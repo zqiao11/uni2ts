@@ -13,6 +13,7 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+import math
 from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, Optional
@@ -85,13 +86,14 @@ class MoiraiFinetune(L.LightningModule):
 
     def __init__(
         self,
-        module_kwargs: dict[str, Any],
         min_patches: int,
         min_mask_ratio: float,
         max_mask_ratio: float,
         max_dim: int,
         num_training_steps: int,
         num_warmup_steps: int,
+        module_kwargs: Optional[dict[str, Any]] = None,
+        module: Optional[MoiraiModule] = None,
         num_samples: int = 100,
         beta1: float = 0.9,
         beta2: float = 0.98,
@@ -101,12 +103,15 @@ class MoiraiFinetune(L.LightningModule):
         weight_decay: float = 1e-2,
         log_on_step: bool = False,
     ):
+        assert (module is not None) or (
+            module_kwargs is not None
+        ), "if module is not provided, module_kwargs is required"
         assert (
             num_warmup_steps <= num_training_steps
         ), f"num_warmup_steps ({num_warmup_steps}) should be <= num_training_steps ({num_training_steps})."
         super().__init__()
-        self.save_hyperparameters()
-        self.module = MoiraiModule(**module_kwargs)
+        self.save_hyperparameters(ignore=["module"])
+        self.module = MoiraiModule(**module_kwargs) if module is None else module
 
     def forward(
         self,
@@ -501,7 +506,7 @@ class MoiraiFinetune(L.LightningModule):
                     collection_type=dict,
                 )
                 + EvalMaskedPrediction(
-                    mask_length=-prediction_length % patch_size,
+                    mask_length=math.ceil(prediction_length / patch_size),
                     target_field="target",
                     truncate_fields=("variate_id", "time_id", "observed_mask"),
                     optional_truncate_fields=("past_feat_dynamic_real",),
