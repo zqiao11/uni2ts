@@ -20,7 +20,6 @@ from pathlib import Path
 from typing import Any, Callable, Generator, Optional
 
 import datasets
-import numpy as np
 import pandas as pd
 from datasets import Features, Sequence, Value
 from torch.utils.data import Dataset
@@ -29,19 +28,25 @@ from uni2ts.common.env import env
 from uni2ts.common.typing import GenFunc
 from uni2ts.data.dataset import EvalDataset, SampleTimeSeriesType, TimeSeriesDataset
 from uni2ts.data.indexer import HuggingFaceDatasetIndexer
-from uni2ts.transform import Identity, Transformation
+from uni2ts.transform import Transformation
 
-# from ._base import DatasetBuilder
-from uni2ts.data.builder._base import DatasetBuilder
+from ._base import DatasetBuilder
+
 
 def _from_long_dataframe(
     df: pd.DataFrame,
+    offset: Optional[int] = None,
+    date_offset: Optional[pd.Timestamp] = None,
 ) -> tuple[GenFunc, Features]:
     items = df.item_id.unique()
 
     def example_gen_func() -> Generator[dict[str, Any], None, None]:
         for item_id in items:
             item_df = df.query(f'item_id == "{item_id}"').drop("item_id", axis=1)
+            if offset is not None:
+                item_df = item_df.iloc[:offset]
+            elif date_offset is not None:
+                item_df = item_df[item_df.index <= date_offset]
             yield {
                 "target": item_df.to_numpy(),
                 "start": item_df.index[0],
@@ -63,7 +68,16 @@ def _from_long_dataframe(
 
 def _from_wide_dataframe(
     df: pd.DataFrame,
+    offset: Optional[int] = None,
+    date_offset: Optional[pd.Timestamp] = None,
 ) -> tuple[GenFunc, Features]:
+    if offset is not None:
+        df = df.iloc[:offset]
+    elif date_offset is not None:
+        df = df[df.index <= date_offset]
+
+    print(df)
+
     def example_gen_func() -> Generator[dict[str, Any], None, None]:
         for i in range(len(df.columns)):
             yield {
@@ -87,7 +101,14 @@ def _from_wide_dataframe(
 
 def _from_wide_dataframe_multivariate(
     df: pd.DataFrame,
+    offset: Optional[int] = None,
+    date_offset: Optional[pd.Timestamp] = None,
 ) -> tuple[GenFunc, Features]:
+    if offset is not None:
+        df = df.iloc[:offset]
+    elif date_offset is not None:
+        df = df[df.index <= date_offset]
+
     def example_gen_func() -> Generator[dict[str, Any], None, None]:
         yield {
             "target": df.to_numpy().T,
@@ -124,9 +145,9 @@ class SimpleDatasetBuilder(DatasetBuilder):
         self,
         file: Path,
         dataset_type: str,
-        offset: int = None,
-        date_offset: pd.Timestamp = None,
-        normalize: bool = False
+        offset: Optional[int] = None,
+        date_offset: Optional[pd.Timestamp] = None,
+        normalize: Optional[bool] = False
     ):
         """
         Build a Hugging Face dataset based on the csv file of the entire TS dataset.
@@ -150,27 +171,24 @@ class SimpleDatasetBuilder(DatasetBuilder):
 
         df = pd.read_csv(file, index_col=0, parse_dates=True)  # Use date as index
 
-        if offset is not None:
-            df = df.iloc[:offset]
-
-        if date_offset is not None:
-            df = df[df.index <= date_offset]
-
         if normalize:
             df = self.scale(df, 0, len(df.index))
 
         if dataset_type == "long":
-            example_gen_func, features = _from_long_dataframe(df)
+            _from_dataframe = _from_long_dataframe
         elif dataset_type == "wide":
-            example_gen_func, features = _from_wide_dataframe(df)
+            _from_dataframe = _from_wide_dataframe
         elif dataset_type == "wide_multivariate":
-            example_gen_func, features = _from_wide_dataframe_multivariate(df)
+            _from_dataframe = _from_wide_dataframe_multivariate
         else:
             raise ValueError(
                 f"Unrecognized dataset_type, {dataset_type}."
                 " Valid options are 'long', 'wide', and 'wide_multivariate'."
             )
 
+        example_gen_func, features = _from_dataframe(
+            df, offset=offset, date_offset=date_offset
+        )
         hf_dataset = datasets.Dataset.from_generator(
             example_gen_func, features=features
         )
@@ -222,17 +240,18 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
             df = (df - mean) / std
 
         if dataset_type == "long":
-            example_gen_func, features = _from_long_dataframe(df)
+            _from_dataframe = _from_long_dataframe
         elif dataset_type == "wide":
-            example_gen_func, features = _from_wide_dataframe(df)
+            _from_dataframe = _from_wide_dataframe
         elif dataset_type == "wide_multivariate":
-            example_gen_func, features = _from_wide_dataframe_multivariate(df)
+            _from_dataframe = _from_wide_dataframe_multivariate
         else:
             raise ValueError(
                 f"Unrecognized dataset_type, {dataset_type}."
                 " Valid options are 'long', 'wide', and 'wide_multivariate'."
             )
 
+        example_gen_func, features = _from_dataframe(df)
         hf_dataset = datasets.Dataset.from_generator(
             example_gen_func, features=features
         )

@@ -7,6 +7,8 @@ Uni2TS also provides tools for fine-tuning, inference, and evaluation for time s
 
 ## 🎉 What's New
 
+* May 2024: The Uni2TS paper has been accepted to ICML 2024 as an Oral presentation!
+
 * Mar 2024: Release of Uni2TS library, along with [Moirai-1.0-R](https://huggingface.co/collections/Salesforce/moirai-10-r-models-65c8d3a94c51428c300e0742) and [LOTSA data](https://huggingface.co/datasets/Salesforce/lotsa_data/)!
 
 ## ✅ TODO
@@ -64,7 +66,7 @@ from gluonts.dataset.split import split
 from huggingface_hub import hf_hub_download
 
 from uni2ts.eval_util.plot import plot_single
-from uni2ts.model.moirai import MoiraiForecast
+from uni2ts.model.moirai import MoiraiForecast, MoiraiModule
 
 
 SIZE = "small"  # model size: choose from {'small', 'base', 'large'}
@@ -97,10 +99,8 @@ test_data = test_template.generate_instances(
 )
 
 # Prepare pre-trained model by downloading model weights from huggingface hub
-model = MoiraiForecast.load_from_checkpoint(
-    checkpoint_path=hf_hub_download(
-        repo_id=f"Salesforce/moirai-1.0-R-{SIZE}", filename="model.ckpt"
-    ),
+model = MoiraiForecast(
+    module=MoiraiModule.from_pretrained(f"Salesforce/moirai-1.0-R-{SIZE}"),
     prediction_length=PDT,
     context_length=CTX,
     patch_size=PSZ,
@@ -108,7 +108,6 @@ model = MoiraiForecast.load_from_checkpoint(
     target_dim=1,
     feat_dynamic_real_dim=ds.num_feat_dynamic_real,
     past_feat_dynamic_real_dim=ds.num_past_feat_dynamic_real,
-    map_location="cuda:0" if torch.cuda.is_available() else "cpu",
 )
 
 predictor = model.create_predictor(batch_size=BSZ)
