@@ -111,7 +111,6 @@ def test_multi_out_size_linear(
     batch_shape: tuple[int, ...],
     in_features: int,
     out_features_ls: tuple[int, ...],
-    dim: int,
     bias: bool,
     seed: int,
 ):
@@ -126,7 +125,6 @@ def test_multi_out_size_linear(
     embed = MultiOutSizeLinear(
         in_features,
         out_features_ls,
-        dim=dim,
         bias=bias,
     )
     embed_out = embed(x, inp_ofs // dim)

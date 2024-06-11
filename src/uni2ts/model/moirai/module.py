@@ -17,12 +17,9 @@ from functools import partial
 
 import torch
 import torch.nn.functional as F
-from huggingface_hub import PyTorchModelHubMixin
-from hydra.utils import instantiate
 from jaxtyping import Bool, Float, Int
 from torch import nn
 from torch.distributions import Distribution
-from torch.utils._pytree import tree_map
 
 from uni2ts.common.torch_util import mask_fill, packed_attention_mask
 from uni2ts.distribution import DistributionOutput
@@ -37,30 +34,7 @@ from uni2ts.module.transformer import TransformerEncoder
 from uni2ts.module.ts_embed import MultiInSizeLinear
 
 
-def encode_distr_output(
-    distr_output: DistributionOutput,
-) -> dict[str, str | float | int]:
-    def _encode(val):
-        if not isinstance(val, DistributionOutput):
-            return val
-
-        return {
-            "_target_": f"{val.__class__.__module__}.{val.__class__.__name__}",
-            **tree_map(_encode, val.__dict__),
-        }
-
-    return _encode(distr_output)
-
-
-def decode_distr_output(config: dict[str, str | float | int]) -> DistributionOutput:
-    return instantiate(config, _convert_="all")
-
-
-class MoiraiModule(
-    nn.Module,
-    PyTorchModelHubMixin,
-    coders={DistributionOutput: (encode_distr_output, decode_distr_output)},
-):
+class MoiraiModule(nn.Module):
     """Contains components of Moirai to ensure implementation is identical across models"""
 
     def __init__(
@@ -68,7 +42,7 @@ class MoiraiModule(
         distr_output: DistributionOutput,
         d_model: int,
         num_layers: int,
-        patch_sizes: tuple[int, ...],  # tuple[int, ...] | list[int]
+        patch_sizes: tuple[int, ...],
         max_seq_len: int,
         attn_dropout_p: float,
         dropout_p: float,
@@ -99,15 +73,17 @@ class MoiraiModule(
             activation=F.silu,
             use_glu=True,
             use_qk_norm=True,
-            var_attn_bias_layer=partial(BinaryAttentionBias),  # Binary attn bias for Variate id
-            time_qk_proj_layer=partial(                        # RoPE for Time index
+            var_attn_bias_layer=partial(
+                BinaryAttentionBias
+            ),  # Binary attn bias for Variate id
+            time_qk_proj_layer=partial(  # RoPE for Time index
                 QueryKeyProjection,
                 proj_layer=RotaryProjection,
                 kwargs=dict(max_len=max_seq_len),
                 partial_factor=(0.0, 0.5),
             ),
             shared_var_attn_bias=False,
-            shared_time_qk_proj=True,                          # Different layers use the same time RoPE QK
+            shared_time_qk_proj=True,  # Different layers use the same time RoPE QK
             d_ff=None,
         )
         self.distr_output = distr_output
@@ -115,15 +91,18 @@ class MoiraiModule(
 
     def forward(
         self,
-        target: Float[torch.Tensor, "*batch seq_len max_patch"],        # (bs, num_patch, max_patch_size)
-        observed_mask: Bool[torch.Tensor, "*batch seq_len max_patch"],  # (bs, num_patch, max_patch_size)
-        sample_id: Int[torch.Tensor, "*batch seq_len"],                 # (bs, num_patch), 0/1 in eval
-        time_id: Int[torch.Tensor, "*batch seq_len"],                   # (bs, num_patch)
-        variate_id: Int[torch.Tensor, "*batch seq_len"],                # (bs, num_patch)
-        prediction_mask: Bool[torch.Tensor, "*batch seq_len"],          # (bs, num_patch)
+        target: Float[
+            torch.Tensor, "*batch seq_len max_patch"
+        ],  # (bs, num_patch, max_patch_size)
+        observed_mask: Bool[
+            torch.Tensor, "*batch seq_len max_patch"
+        ],  # (bs, num_patch, max_patch_size)
+        sample_id: Int[torch.Tensor, "*batch seq_len"],  # (bs, num_patch), 0/1 in eval
+        time_id: Int[torch.Tensor, "*batch seq_len"],  # (bs, num_patch)
+        variate_id: Int[torch.Tensor, "*batch seq_len"],  # (bs, num_patch)
+        prediction_mask: Bool[torch.Tensor, "*batch seq_len"],  # (bs, num_patch)
         patch_size: Int[torch.Tensor, "*batch seq_len"],
     ) -> Distribution:
-
         """
         num_patches:
             - 'max_length' of model due to sequence packing in training;
@@ -147,7 +126,8 @@ class MoiraiModule(
         # If patches from padding, their loc/scale are zeros and ones, respectively.
         loc, scale = self.scaler(
             target,
-            observed_mask * ~prediction_mask.unsqueeze(-1),  # Observed and not in prediction range
+            observed_mask
+            * ~prediction_mask.unsqueeze(-1),  # Observed and not in prediction range
             sample_id,
             variate_id,
         )
@@ -163,7 +143,9 @@ class MoiraiModule(
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
         reprs = self.encoder(
             masked_reprs,
-            packed_attention_mask(sample_id),  # (bs, num_patch, num_patch). If patches are from the same sample.
+            packed_attention_mask(
+                sample_id
+            ),  # (bs, num_patch, num_patch). If patches are from the same sample.
             time_id=time_id,
             var_id=variate_id,
         )

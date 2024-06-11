@@ -80,7 +80,7 @@ class PackedLoss(abc.ABC):
             id_mask
             * reduce(
                 mask,
-                "... seq dim -> ... 1 seq",   # How many observed tokens in prediction range for each patch
+                "... seq dim -> ... 1 seq",  # How many observed tokens in prediction range for each patch
                 "sum",
             ),
             "... seq1 seq2 -> ... seq1 1",

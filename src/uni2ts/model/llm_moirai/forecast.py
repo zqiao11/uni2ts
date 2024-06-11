@@ -13,23 +13,11 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
-from transformers import (
-    LlamaConfig,
-    LlamaModel,
-    LlamaTokenizer,
-    GPT2Config,
-    GPT2Model,
-    GPT2Tokenizer,
-    BertConfig,
-    BertModel,
-    BertTokenizer
-)
-
 import math
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Generator, Optional
-from torch import nn
+
 import lightning as L
 import numpy as np
 import torch
@@ -45,16 +33,29 @@ from gluonts.transform import (
 )
 from gluonts.transform.split import TFTInstanceSplitter
 from jaxtyping import Bool, Float, Int
+from peft import LoraConfig, LoraModel
+from torch import nn
 from torch.distributions import Distribution
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BertConfig,
+    BertModel,
+    BertTokenizer,
+    GPT2Config,
+    GPT2Model,
+    GPT2Tokenizer,
+    LlamaConfig,
+    LlamaModel,
+    LlamaTokenizer,
+)
 
 from uni2ts.common.torch_util import safe_div
 from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
-
+from uni2ts.model.llm_moirai.finetune import calculate_lags, get_data_description
+from uni2ts.model.llm_moirai.resampler import LinearProjector, PerceiverResampler
 from uni2ts.model.moirai.module import MoiraiModule
-from uni2ts.model.llm_moirai.finetune import get_data_description, calculate_lags
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
-from uni2ts.model.llm_moirai.resampler import PerceiverResampler, LinearProjector
-from peft import LoraConfig, LoraModel
 
 
 class SampleNLLLoss(_PackedNLLLoss):
@@ -88,14 +89,14 @@ class SampleNLLLoss(_PackedNLLLoss):
 class LlmMoiraiForecast(L.LightningModule):
     def __init__(
         self,
-        module_kwargs: dict[str, Any],  # Already provided in checkpoints of Moirai classes
+        module_kwargs: dict[str, Any],  # Provided in ckpt of Moirai
         llm_kwargs: dict[str, Any],
         proj_kwargs: dict[str, Any],
         lora_kwargs: dict[str, Any],
         # task_kwargs: dict[str, Any],  # If not provided, follow MoiraiFinetune's training strategy
         data: str,
         prediction_length: int,
-        target_dim: int,                     # Get from meta data of test dataset
+        target_dim: int,  # Get from meta data of test dataset
         feat_dynamic_real_dim: int,
         past_feat_dynamic_real_dim: int,
         context_length: int,
@@ -107,16 +108,18 @@ class LlmMoiraiForecast(L.LightningModule):
         self.module = MoiraiModule(**module_kwargs)
 
         # Set LLM
-        self.d_llm = llm_kwargs['d_llm']
-        self.llm_layers = llm_kwargs['llm_layers']
-        self.llm_model = self._set_llm_model(llm_kwargs['llm_model'])  # LLM is frozen
-        self.llm_tokenizer = self._set_llm_tokenizer(llm_kwargs['llm_model'])
-        if self.hparams.llm_kwargs['llm_model'] == 'LLAMA3':
+        self.d_llm = llm_kwargs["d_llm"]
+        self.llm_layers = llm_kwargs["llm_layers"]
+        self.llm_model = self._set_llm_model(llm_kwargs["llm_model"])  # LLM is frozen
+        self.llm_tokenizer = self._set_llm_tokenizer(llm_kwargs["llm_model"])
+        if self.hparams.llm_kwargs["llm_model"] == "LLAMA3":
             self.llm_model.resize_token_embeddings(len(self.llm_tokenizer))
             self.llm_model.config.pad_token_id = self.llm_tokenizer.pad_token_id
-            self.llm_model.embed_tokens = nn.Embedding(self.llm_model.config.vocab_size,
-                                                       self.llm_model.config.hidden_size,
-                                                       padding_idx=self.llm_model.config.pad_token_id)
+            self.llm_model.embed_tokens = nn.Embedding(
+                self.llm_model.config.vocab_size,
+                self.llm_model.config.hidden_size,
+                padding_idx=self.llm_model.config.pad_token_id,
+            )
 
         # ToDo: Make sure forecast's config is the same as finetune ckpt' config
         #  Now patch_size cannot be 'auto'
@@ -125,30 +128,36 @@ class LlmMoiraiForecast(L.LightningModule):
         self.prediction_length = prediction_length
         self.context_length = context_length
 
-
         # Set projector.
-        self.proj_type = proj_kwargs['projector']
-        if self.proj_type == 'Linear':
-            self.projector = LinearProjector(in_features=self.d_llm,
-                                             out_features=self.patch_size,
-                                             dropout=self.hparams.proj_kwargs['dropout'],
-                                             bias=self.hparams.proj_kwargs['bias'])
+        self.proj_type = proj_kwargs["projector"]
+        if self.proj_type == "Linear":
+            self.projector = LinearProjector(
+                in_features=self.d_llm,
+                out_features=self.patch_size,
+                dropout=self.hparams.proj_kwargs["dropout"],
+                bias=self.hparams.proj_kwargs["bias"],
+            )
 
-        elif self.proj_type == 'Resampler':
-            self.projector = nn.Sequential(PerceiverResampler(dim=self.d_llm,
-                                                              depth=3,
-                                                              dim_head=64,
-                                                              heads=8,
-                                                              num_queries=self.hparams.proj_kwargs['num_queries'],
-                                                              max_seq_len=512,
-                                                              ff_mult=2),
-                                           LinearProjector(in_features=self.d_llm,
-                                                           out_features=self.patch_size,
-                                                           dropout=self.hparams.proj_kwargs['dropout'],
-                                                           bias=self.hparams.proj_kwargs['bias'])
-                                           )
+        elif self.proj_type == "Resampler":
+            self.projector = nn.Sequential(
+                PerceiverResampler(
+                    dim=self.d_llm,
+                    depth=3,
+                    dim_head=64,
+                    heads=8,
+                    num_queries=self.hparams.proj_kwargs["num_queries"],
+                    max_seq_len=512,
+                    ff_mult=2,
+                ),
+                LinearProjector(
+                    in_features=self.d_llm,
+                    out_features=self.patch_size,
+                    dropout=self.hparams.proj_kwargs["dropout"],
+                    bias=self.hparams.proj_kwargs["bias"],
+                ),
+            )
 
-        elif self.proj_type == 'Honeybee':
+        elif self.proj_type == "Honeybee":
             pass  # ToDo: D-abstractor
         else:
             raise ValueError("Unknown projector type")
@@ -165,27 +174,27 @@ class LlmMoiraiForecast(L.LightningModule):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
-        if llm_model == 'LLAMA3':
-            self.llama_config = AutoConfig.from_pretrained('meta-llama/Meta-Llama-3-8B')
+        if llm_model == "LLAMA3":
+            self.llama_config = AutoConfig.from_pretrained("meta-llama/Meta-Llama-3-8B")
             self.llama_config.num_hidden_layers = self.llm_layers
             self.llama_config.output_attentions = True
             self.llama_config.output_hidden_states = True
 
             llm_model = AutoModelForCausalLM.from_pretrained(
-                    "meta-llama/Meta-Llama-3-8B",
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                    config=self.llama_config,
+                "meta-llama/Meta-Llama-3-8B",
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                config=self.llama_config,
             )
 
-        if llm_model == 'LLAMA2':
-            self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
+        if llm_model == "LLAMA2":
+            self.llama_config = LlamaConfig.from_pretrained("huggyllama/llama-7b")
             self.llama_config.num_hidden_layers = self.llm_layers
             self.llama_config.output_attentions = True
             self.llama_config.output_hidden_states = True
             try:
                 llm_model = LlamaModel.from_pretrained(
-                    'huggyllama/llama-7b',
+                    "huggyllama/llama-7b",
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.llama_config,
@@ -195,7 +204,7 @@ class LlmMoiraiForecast(L.LightningModule):
             except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 llm_model = LlamaModel.from_pretrained(
-                    'huggyllama/llama-7b',
+                    "huggyllama/llama-7b",
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.llama_config,
@@ -203,14 +212,14 @@ class LlmMoiraiForecast(L.LightningModule):
                     # load_in_4bit=True
                 )
 
-        elif llm_model == 'GPT2':
-            self.gpt2_config = GPT2Config.from_pretrained('openai-community/gpt2')
+        elif llm_model == "GPT2":
+            self.gpt2_config = GPT2Config.from_pretrained("openai-community/gpt2")
             self.gpt2_config.num_hidden_layers = self.llm_layers
             self.gpt2_config.output_attentions = True
             self.gpt2_config.output_hidden_states = True
             try:
                 llm_model = GPT2Model.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.gpt2_config,
@@ -218,20 +227,22 @@ class LlmMoiraiForecast(L.LightningModule):
             except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 llm_model = GPT2Model.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.gpt2_config,
                 )
 
-        elif llm_model == 'BERT':
-            self.bert_config = BertConfig.from_pretrained('google-bert/bert-base-uncased')
+        elif llm_model == "BERT":
+            self.bert_config = BertConfig.from_pretrained(
+                "google-bert/bert-base-uncased"
+            )
             self.bert_config.num_hidden_layers = self.llm_layers
             self.bert_config.output_attentions = True
             self.bert_config.output_hidden_states = True
             try:
                 llm_model = BertModel.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.bert_config,
@@ -239,13 +250,13 @@ class LlmMoiraiForecast(L.LightningModule):
             except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 llm_model = BertModel.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.bert_config,
                 )
         else:
-            raise Exception('LLM model is not defined')
+            raise Exception("LLM model is not defined")
 
         # Freeze LLM's parameters
         for param in llm_model.parameters():
@@ -257,60 +268,64 @@ class LlmMoiraiForecast(L.LightningModule):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
-        if llm_model == 'LLAMA3':
+        if llm_model == "LLAMA3":
             tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 
-        elif llm_model == 'LLAMA2':
+        elif llm_model == "LLAMA2":
             try:
                 tokenizer = LlamaTokenizer.from_pretrained(
-                    'huggyllama/llama-7b',
-                    trust_remote_code=True,
-                    local_files_only=True
+                    "huggyllama/llama-7b", trust_remote_code=True, local_files_only=True
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+            except (
+                EnvironmentError
+            ):  # downloads the tokenizer from HF if not already done
                 print("Local tokenizer files not found. Atempting to download them..")
                 tokenizer = LlamaTokenizer.from_pretrained(
-                    'huggyllama/llama-7b',
+                    "huggyllama/llama-7b",
                     trust_remote_code=True,
-                    local_files_only=False
+                    local_files_only=False,
                 )
 
-        elif llm_model == 'GPT2':
+        elif llm_model == "GPT2":
             try:
                 tokenizer = GPT2Tokenizer.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
-                    local_files_only=True
+                    local_files_only=True,
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+            except (
+                EnvironmentError
+            ):  # downloads the tokenizer from HF if not already done
                 print("Local tokenizer files not found. Atempting to download them..")
                 tokenizer = GPT2Tokenizer.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
-                    local_files_only=False
+                    local_files_only=False,
                 )
-        elif llm_model == 'BERT':
+        elif llm_model == "BERT":
             try:
                 tokenizer = BertTokenizer.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
-                    local_files_only=True
+                    local_files_only=True,
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+            except (
+                EnvironmentError
+            ):  # downloads the tokenizer from HF if not already done
                 print("Local tokenizer files not found. Atempting to download them..")
                 tokenizer = BertTokenizer.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
-                    local_files_only=False
+                    local_files_only=False,
                 )
         else:
-            raise Exception('LLM model is not defined')
+            raise Exception("LLM model is not defined")
 
         if tokenizer.eos_token:
             tokenizer.pad_token = tokenizer.eos_token
         else:
-            pad_token = '[PAD]'
-            tokenizer.add_special_tokens({'pad_token': pad_token})
+            pad_token = "[PAD]"
+            tokenizer.add_special_tokens({"pad_token": pad_token})
             tokenizer.pad_token = pad_token
 
         return tokenizer
@@ -447,9 +462,15 @@ class LlmMoiraiForecast(L.LightningModule):
         past_observed_target: Bool[torch.Tensor, "batch past_time tgt"],
         past_is_pad: Bool[torch.Tensor, "batch past_time"],
         feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        past_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
-        past_observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
+        observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch time feat"]
+        ] = None,
+        past_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
+        past_observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
         num_samples: Optional[int] = None,
     ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
 
@@ -461,8 +482,12 @@ class LlmMoiraiForecast(L.LightningModule):
                 val_loss.append(
                     self._val_loss(
                         patch_size=patch_size,
-                        target=past_target[..., : self.past_length, :],  # context + predict_len
-                        observed_target=past_observed_target[..., : self.past_length, :],
+                        target=past_target[
+                            ..., : self.past_length, :
+                        ],  # context + predict_len
+                        observed_target=past_observed_target[
+                            ..., : self.past_length, :
+                        ],
                         is_pad=past_is_pad[..., : self.past_length],
                         feat_dynamic_real=(
                             feat_dynamic_real[..., : self.past_length, :]
@@ -476,12 +501,16 @@ class LlmMoiraiForecast(L.LightningModule):
                         ),
                         # Only use context range for these two.
                         past_feat_dynamic_real=(
-                            past_feat_dynamic_real[..., : self.hparams.context_length, :]
+                            past_feat_dynamic_real[
+                                ..., : self.hparams.context_length, :
+                            ]
                             if past_feat_dynamic_real is not None
                             else None
                         ),
                         past_observed_feat_dynamic_real=(
-                            past_observed_feat_dynamic_real[..., : self.hparams.context_length, :]
+                            past_observed_feat_dynamic_real[
+                                ..., : self.hparams.context_length, :
+                            ]
                             if past_observed_feat_dynamic_real is not None
                             else None
                         ),
@@ -526,7 +555,9 @@ class LlmMoiraiForecast(L.LightningModule):
                 )
             val_loss = torch.stack(val_loss)  # (patch_sizes, bs)
             preds = torch.stack(preds)
-            idx = val_loss.argmin(dim=0)  # bs; for each sample, use the patch_size with the lowest val loss
+            idx = val_loss.argmin(
+                dim=0
+            )  # bs; for each sample, use the patch_size with the lowest val loss
             return preds[idx, torch.arange(len(idx), device=idx.device)]
         else:
             distr = self._get_distr(
@@ -553,9 +584,15 @@ class LlmMoiraiForecast(L.LightningModule):
         observed_target: Bool[torch.Tensor, "batch time tgt"],
         is_pad: Bool[torch.Tensor, "batch time"],
         feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        past_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
-        past_observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
+        observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch time feat"]
+        ] = None,
+        past_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
+        past_observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
     ) -> Float[torch.Tensor, "batch"]:
         # convert format
         (
@@ -571,12 +608,12 @@ class LlmMoiraiForecast(L.LightningModule):
             past_target=target[..., : self.hparams.context_length, :],
             past_observed_target=observed_target[..., : self.hparams.context_length, :],
             past_is_pad=is_pad[..., : self.hparams.context_length],
-
             # future is included in target if self.hparams.patch_size is 'auto', else None.
             future_target=target[..., self.hparams.context_length :, :],
-            future_observed_target=observed_target[..., self.hparams.context_length :, :],
+            future_observed_target=observed_target[
+                ..., self.hparams.context_length :, :
+            ],
             future_is_pad=is_pad[..., self.hparams.context_length :],
-
             feat_dynamic_real=feat_dynamic_real,
             observed_feat_dynamic_real=observed_feat_dynamic_real,
             past_feat_dynamic_real=past_feat_dynamic_real,
@@ -610,9 +647,15 @@ class LlmMoiraiForecast(L.LightningModule):
         past_observed_target: Bool[torch.Tensor, "batch past_time tgt"],
         past_is_pad: Bool[torch.Tensor, "batch past_time"],
         feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        past_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
-        past_observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
+        observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch time feat"]
+        ] = None,
+        past_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
+        past_observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
     ) -> Distribution:
         # convert format
         (
@@ -637,10 +680,13 @@ class LlmMoiraiForecast(L.LightningModule):
         prompt = self._get_sample_prompt(target, observed_mask, prediction_mask)
 
         #  Get LLM reprs of prompt.
-        prompt = self.llm_tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048)
+        prompt = self.llm_tokenizer(
+            prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048
+        )
         prompt = prompt.to(self.llm_model.device)
-        prompt_reprs = self.llm_model(input_ids=prompt.input_ids,
-                                      attention_mask=prompt.attention_mask).last_hidden_state  # (bs, num_prompt_patches, d_llm)
+        prompt_reprs = self.llm_model(
+            input_ids=prompt.input_ids, attention_mask=prompt.attention_mask
+        ).last_hidden_state  # (bs, num_prompt_patches, d_llm)
 
         # ToDo: Add a Q-former to reduce prompt length to a fixed length!
         #  Samples from different batches have different prompt length.
@@ -657,27 +703,48 @@ class LlmMoiraiForecast(L.LightningModule):
         # Prepend prompt, modify the masks and ids.
 
         #  Pad last dim of prompt_prefix to max_patch_size.
-        padded_prompt_prefix = torch.zeros((prompt_prefix.size(0), prompt_prefix.size(1), max(self.module.patch_sizes)),
-                                           dtype=prompt_prefix.dtype,
-                                           device=target.device)
-        padded_prompt_prefix[:, :, :prompt_prefix.size(2)] = prompt_prefix  # (bs, num_prompt_patches, max_patch_size)
+        padded_prompt_prefix = torch.zeros(
+            (
+                prompt_prefix.size(0),
+                prompt_prefix.size(1),
+                max(self.module.patch_sizes),
+            ),
+            dtype=prompt_prefix.dtype,
+            device=target.device,
+        )
+        padded_prompt_prefix[:, :, : prompt_prefix.size(2)] = (
+            prompt_prefix  # (bs, num_prompt_patches, max_patch_size)
+        )
 
         #  First patch of each sample starts with non-observed values due to padding.
         #  Can we directly prepend prompt to target? Then that patch will be [True, True, False, ..., True, ...]
         #  Time Series is cut into separated segments by the mask... Not consecutive.
         #  Can! Not necessary to handle it. It is common for patching.
-        prompt_observed_mask = torch.zeros((prompt_prefix.size(0), prompt_prefix.size(1), max(self.module.patch_sizes)),
-                                           dtype=observed_mask.dtype,
-                                           device=observed_mask.device)
-        prompt_observed_mask[:, :, :prompt_prefix.size(2)] = True
+        prompt_observed_mask = torch.zeros(
+            (
+                prompt_prefix.size(0),
+                prompt_prefix.size(1),
+                max(self.module.patch_sizes),
+            ),
+            dtype=observed_mask.dtype,
+            device=observed_mask.device,
+        )
+        prompt_observed_mask[:, :, : prompt_prefix.size(2)] = True
 
         target = torch.cat([padded_prompt_prefix, target], dim=1)
         observed_mask = torch.cat([prompt_observed_mask, observed_mask], dim=1)
 
         # Each item is an individual sample and none of patches is completely padded, so all sample_ids are ones.
         sample_id = torch.cat(
-            [torch.ones((batch_size, num_prompt_tokens), dtype=sample_id.dtype, device=sample_id.device), sample_id],
-            dim=1
+            [
+                torch.ones(
+                    (batch_size, num_prompt_tokens),
+                    dtype=sample_id.dtype,
+                    device=sample_id.device,
+                ),
+                sample_id,
+            ],
+            dim=1,
         )
 
         # Todo: For uni-channel are as below. How to deal with flatten multi-channel? prompt as a new variate?
@@ -685,23 +752,33 @@ class LlmMoiraiForecast(L.LightningModule):
         # Then concat with [0,..., num_prompt_patches].
         # No Sequence packing, so no worry about the ending patches are padded and with time id of zeros.
         time_id = torch.cat(
-            [torch.arange(0, num_prompt_tokens, dtype=time_id.dtype, device=time_id.device).repeat(time_id.size(0), 1),
-             time_id + num_prompt_tokens],
-            dim=1
+            [
+                torch.arange(
+                    0, num_prompt_tokens, dtype=time_id.dtype, device=time_id.device
+                ).repeat(time_id.size(0), 1),
+                time_id + num_prompt_tokens,
+            ],
+            dim=1,
         )
 
         # ToDo: For uni-channel, duplicate. For flatten multi-channel, create a new variate.
         #  Cannot be the same as the ones in exsisting variates. Need to in the max_dim range.
         variate_id = repeat(
             variate_id[:, 0],
-            'batch -> batch seq_len',
-            seq_len=variate_id.shape[1] + num_prompt_tokens
+            "batch -> batch seq_len",
+            seq_len=variate_id.shape[1] + num_prompt_tokens,
         )
 
         prediction_mask = torch.cat(
-            [torch.zeros((batch_size, num_prompt_tokens), dtype=prediction_mask.dtype, device=prediction_mask.device),
-             prediction_mask],
-            dim=1
+            [
+                torch.zeros(
+                    (batch_size, num_prompt_tokens),
+                    dtype=prediction_mask.dtype,
+                    device=prediction_mask.device,
+                ),
+                prediction_mask,
+            ],
+            dim=1,
         )
 
         # get predictions
@@ -721,9 +798,7 @@ class LlmMoiraiForecast(L.LightningModule):
         prompt = []
         for b in range(target.size(0)):
             # Dataset Description
-            prompt_ = (
-                f"<|start_prompt|>Dataset description: {self.data_description};"
-            )
+            prompt_ = f"<|start_prompt|>Dataset description: {self.data_description};"
 
             # Task description if task params are known.
             if self.hparams.prediction_length and self.hparams.context_length:
@@ -737,8 +812,12 @@ class LlmMoiraiForecast(L.LightningModule):
             # if self.hparams.prompt_statistics:
 
             # Mask indicating the observed tokens in context range for a sample b.
-            mask = observed_mask[b] & ~prediction_mask[b].unsqueeze(-1).expand_as(observed_mask[b])
-            valid_target = target[b][mask]  # A 1D tensor with observed context time steps
+            mask = observed_mask[b] & ~prediction_mask[b].unsqueeze(-1).expand_as(
+                observed_mask[b]
+            )
+            valid_target = target[b][
+                mask
+            ]  # A 1D tensor with observed context time steps
             min_value = torch.min(valid_target).item()
             max_value = torch.max(valid_target).item()
             median = torch.median(valid_target).item()
@@ -749,18 +828,19 @@ class LlmMoiraiForecast(L.LightningModule):
             max_value_str = str(round(max_value, 4))
             median_value_str = str(round(median, 4))
             lags_values_str = str(lags.tolist())
-            prompt_ += (f"Input statistics: "
-                        f"min value {min_value_str}, "
-                        f"max value {max_value_str}, "
-                        f"median value {median_value_str}, "
-                        f"the trend of input is {'upward' if trend > 0 else 'downward'}, "
-                        f"top 5 lags are : {lags_values_str};")
+            prompt_ += (
+                f"Input statistics: "
+                f"min value {min_value_str}, "
+                f"max value {max_value_str}, "
+                f"median value {median_value_str}, "
+                f"the trend of input is {'upward' if trend > 0 else 'downward'}, "
+                f"top 5 lags are : {lags_values_str};"
+            )
 
             prompt_ += "<|<end_prompt>|>"
             prompt.append(prompt_)
 
         return prompt
-
 
     @staticmethod
     def _patched_seq_pad(
@@ -793,12 +873,16 @@ class LlmMoiraiForecast(L.LightningModule):
 
         # (bs, num_patches). Patches from unobserved range are False, others are True.
         past_seq_id = reduce(
-            self._patched_seq_pad(patch_size, past_observed_target, -2, left=True),  # Pad along the time step dimension
+            self._patched_seq_pad(
+                patch_size, past_observed_target, -2, left=True
+            ),  # Pad along the time step dimension
             "... (seq patch) dim -> ... seq",
             "max",
             patch=patch_size,
         )
-        past_seq_id = torch.clamp(past_seq_id.cumsum(dim=-1) - 1, min=0)  # Cumulate  ToDo: starts from 0. Cannot distinguish padded and the 1st ts patch. And how is the time_id in Train?
+        past_seq_id = torch.clamp(
+            past_seq_id.cumsum(dim=-1) - 1, min=0
+        )  # Cumulate  ToDo: starts from 0. Cannot distinguish padded and the 1st ts patch. And how is the time_id in Train?
         batch_shape = " ".join(map(str, past_observed_target.shape[:-2]))
         future_seq_id = (
             repeat(
@@ -819,13 +903,25 @@ class LlmMoiraiForecast(L.LightningModule):
         past_target: Float[torch.Tensor, "batch past_time tgt"],
         past_observed_target: Bool[torch.Tensor, "batch past_time tgt"],
         past_is_pad: Bool[torch.Tensor, "batch past_time"],
-        future_target: Optional[Float[torch.Tensor, "batch future_time tgt"]] = None,           # Not used if ps is auto
-        future_observed_target: Optional[Bool[torch.Tensor, "batch future_time tgt"]] = None,   # Not used if ps is auto
-        future_is_pad: Optional[Bool[torch.Tensor, "batch future_time"]] = None,                # Not used if ps is auto
+        future_target: Optional[
+            Float[torch.Tensor, "batch future_time tgt"]
+        ] = None,  # Not used if ps is auto
+        future_observed_target: Optional[
+            Bool[torch.Tensor, "batch future_time tgt"]
+        ] = None,  # Not used if ps is auto
+        future_is_pad: Optional[
+            Bool[torch.Tensor, "batch future_time"]
+        ] = None,  # Not used if ps is auto
         feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        past_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
-        past_observed_feat_dynamic_real: Optional[Float[torch.Tensor, "batch past_time past_feat"]] = None,
+        observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch time feat"]
+        ] = None,
+        past_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
+        past_observed_feat_dynamic_real: Optional[
+            Float[torch.Tensor, "batch past_time past_feat"]
+        ] = None,
     ) -> tuple[
         Float[torch.Tensor, "batch combine_seq patch"],  # target
         Bool[torch.Tensor, "batch combine_seq patch"],  # observed_mask
@@ -868,16 +964,22 @@ class LlmMoiraiForecast(L.LightningModule):
             [
                 torch.nn.functional.pad(
                     rearrange(
-                        self._patched_seq_pad(patch_size, past_target, -2, left=True),  # Past is padded on the left
+                        self._patched_seq_pad(
+                            patch_size, past_target, -2, left=True
+                        ),  # Past is padded on the left
                         "... (seq patch) dim -> ... (dim seq) patch",
                         patch=patch_size,
                     ),
-                    (0, self.max_patch_size - patch_size),  # Pad the last dim to max_patch_size.
+                    (
+                        0,
+                        self.max_patch_size - patch_size,
+                    ),  # Pad the last dim to max_patch_size.
                 ),
                 torch.nn.functional.pad(
                     rearrange(
                         self._patched_seq_pad(
-                            patch_size, future_target, -2, left=False),  # Future is padded on the right
+                            patch_size, future_target, -2, left=False
+                        ),  # Future is padded on the right
                         "... (seq patch) dim -> ... (dim seq) patch",
                         patch=patch_size,
                     ),
@@ -939,12 +1041,16 @@ class LlmMoiraiForecast(L.LightningModule):
         # 1: not all tokens are from padding, 0: all tokens in a patch are from padding.
         # For eval, no sequence packing. Each item is a sample. So only 0 and 1 in sample_id.
         sample_id.extend(
-            [    # past_is_pad is in shape of "batch past_time".
+            [  # past_is_pad is in shape of "batch past_time".
                 repeat(
                     reduce(
                         (
                             self._patched_seq_pad(
-                                patch_size, past_is_pad, -1, left=True, value=1  # Pad with 1
+                                patch_size,
+                                past_is_pad,
+                                -1,
+                                left=True,
+                                value=1,  # Pad with 1
                             )
                             == 0
                         ).int(),  # Turn to 0 / 1; if padded is 0.
@@ -1254,11 +1360,11 @@ class LlmMoiraiForecast(L.LightningModule):
         variate_id = torch.cat(variate_id, dim=-1)
         prediction_mask = torch.cat(prediction_mask, dim=-1)
         return (
-            target,           # (bs, P_past + P_future, max_patch_size)
-            observed_mask,    # (bs, P_past + P_future, max_patch_size), Boolean
-            sample_id,        # (bs, P_past + P_future), 0/1
-            time_id,          # (bs, P_past + P_future)
-            variate_id,       # (bs, P_past + P_future)
+            target,  # (bs, P_past + P_future, max_patch_size)
+            observed_mask,  # (bs, P_past + P_future, max_patch_size), Boolean
+            sample_id,  # (bs, P_past + P_future), 0/1
+            time_id,  # (bs, P_past + P_future)
+            variate_id,  # (bs, P_past + P_future)
             prediction_mask,  # (bs, P_past + P_future), Boolean
         )
 

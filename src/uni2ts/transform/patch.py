@@ -58,6 +58,7 @@ class DefaultPatchSizeConstraints(PatchSizeConstraints):
     """
     Appendix B.1
     """
+
     # https://pandas.pydata.org/pandas-docs/stable/user_guide/timeseries.html#offset-aliases
     DEFAULT_RANGES = {
         "S": (64, 128),  # 512s = 8.53min, 4096s = 68.26min
@@ -81,7 +82,7 @@ class DefaultPatchSizeConstraints(PatchSizeConstraints):
 class GetPatchSize(Transformation):
     min_time_patches: int
     target_field: str = "target"
-    patch_sizes: tuple[int, ...] | list[int] | range = (8, 16, 32, 64, 128)
+    patch_sizes: tuple[int, ...] | range = (8, 16, 32, 64, 128)
     patch_size_constraints: PatchSizeConstraints = DefaultPatchSizeConstraints()
     offset: bool = True
 
@@ -93,7 +94,7 @@ class GetPatchSize(Transformation):
         length = target[0].shape[0]
         patch_size_ceil = length // self.min_time_patches
 
-        if isinstance(self.patch_sizes, (tuple, list)):
+        if isinstance(self.patch_sizes, tuple):
             patch_size_candidates = [
                 patch_size
                 for patch_size in self.patch_sizes
@@ -155,8 +156,13 @@ class Patchify(MapFuncMixin, Transformation):
         self, arr: Num[np.ndarray, "var time*patch"], patch_size: int
     ) -> Num[np.ndarray, "var time max_patch"]:
         assert arr.shape[-1] % patch_size == 0
-        arr = rearrange(arr, "... (time patch) -> ... time patch", patch=patch_size)  # target can be MTS.
+        arr = rearrange(
+            arr, "... (time patch) -> ... time patch", patch=patch_size
+        )  # target can be MTS.
         pad_width = [(0, 0) for _ in range(arr.ndim)]
-        pad_width[-1] = (0, self.max_patch_size - patch_size)  # Only pad the patch dim, post-pad to max_patch_size
+        pad_width[-1] = (
+            0,
+            self.max_patch_size - patch_size,
+        )  # Only pad the patch dim, post-pad to max_patch_size
         arr = np.pad(arr, pad_width, mode="constant", constant_values=self.pad_value)
         return arr

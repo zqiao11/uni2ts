@@ -103,8 +103,12 @@ class TransformerEncoder(nn.Module):
         use_qk_norm: bool = True,
         var_attn_bias_layer: Optional[Callable[[int, int, int], AttentionBias]] = None,
         time_attn_bias_layer: Optional[Callable[[int, int, int], AttentionBias]] = None,
-        var_qk_proj_layer: Optional[Callable[[int, int, int], QueryKeyProjection]] = None,
-        time_qk_proj_layer: Optional[Callable[[int, int, int], QueryKeyProjection]] = None,
+        var_qk_proj_layer: Optional[
+            Callable[[int, int, int], QueryKeyProjection]
+        ] = None,
+        time_qk_proj_layer: Optional[
+            Callable[[int, int, int], QueryKeyProjection]
+        ] = None,
         shared_var_attn_bias: bool = False,
         shared_time_attn_bias: bool = False,
         shared_var_qk_proj: bool = False,
@@ -191,7 +195,9 @@ class TransformerEncoder(nn.Module):
             return None
         if shared_layer:  # Creates a single layer instance.
             module = layer(dim=dim, num_heads=num_heads, num_groups=num_groups)
-            return lambda: module  # Lambada: always return the same instance. --> layer is shared
+            return (
+                lambda: module
+            )  # Lambada: always return the same instance. --> layer is shared
         return partial(layer, dim=dim, num_heads=num_heads, num_groups=num_groups)
 
     def forward(

@@ -1,42 +1,49 @@
-
-from collections import defaultdict
-from transformers import (
-    LlamaConfig,
-    LlamaModel,
-    LlamaTokenizer,
-    GPT2Config,
-    GPT2Model,
-    GPT2Tokenizer,
-    BertConfig,
-    BertModel,
-    BertTokenizer
-)
 import math
-from uni2ts.model.moirai import MoiraiModule
+from collections import defaultdict
 from collections.abc import Callable, Sequence
 from typing import Any, Optional
+
 import lightning as L
 import numpy as np
 import torch
-from einops import rearrange
+from einops import rearrange, repeat
 from jaxtyping import Bool, Float, Int
+from peft import LoraConfig, LoraModel
 from torch import nn
-from uni2ts.module.norm import RMSNorm
-from uni2ts.module.position import (
-    BinaryAttentionBias,
-    LearnedEmbedding,
-    LearnedProjection,
+from transformers import (
+    AutoConfig,
+    AutoModelForCausalLM,
+    AutoTokenizer,
+    BertConfig,
+    BertModel,
+    BertTokenizer,
+    GPT2Config,
+    GPT2Model,
+    GPT2Tokenizer,
+    LlamaConfig,
+    LlamaModel,
+    LlamaTokenizer,
 )
+
 from uni2ts.loss.packed import (
     PackedDistributionLoss,
     PackedLoss,
     PackedNLLLoss,
     PackedPointLoss,
 )
+from uni2ts.model.llm_moirai.resampler import LinearProjector, PerceiverResampler
+from uni2ts.model.moirai import MoiraiModule
+from uni2ts.module.norm import RMSNorm
+from uni2ts.module.position import (
+    BinaryAttentionBias,
+    LearnedEmbedding,
+    LearnedProjection,
+)
 from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
 from uni2ts.transform import (
     AddObservedMask,
+    AddSampleIndex,
     AddTimeIndex,
     AddVariateIndex,
     DefaultPatchSizeConstraints,
@@ -52,20 +59,15 @@ from uni2ts.transform import (
     ImputeTimeSeries,
     MaskedPrediction,
     PackFields,
+    PadOutRangeTokens,
     PatchCrop,
-    SpecifiedPatchCrop,
     Patchify,
     SampleDimension,
     SelectFields,
     SequencifyField,
+    SpecifiedPatchCrop,
     Transformation,
-    AddSampleIndex,
-    PadOutRangeTokens
 )
-from einops import repeat
-from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
-from peft import LoraConfig, LoraModel
-from uni2ts.model.llm_moirai.resampler import PerceiverResampler, LinearProjector
 
 
 def print_trainable_parameters(model):
@@ -81,11 +83,11 @@ def print_trainable_parameters(model):
 
 
 def get_data_description(data: str):
-    if 'ETT' in data:
-        file = 'ETT'
+    if "ETT" in data:
+        file = "ETT"
     else:
         file = data
-    with open('./dataset/prompt_bank/{0}.txt'.format(file), 'r') as f:
+    with open("./dataset/prompt_bank/{0}.txt".format(file), "r") as f:
         content = f.read()
     return content
 
@@ -106,6 +108,7 @@ class LlmMoiraiFinetune(L.LightningModule):
     Pass specific context_length, prediction_length and patch_size when finetuning.
 
     """
+
     seq_fields: tuple[str, ...] = (
         "target",
         "observed_mask",
@@ -126,11 +129,15 @@ class LlmMoiraiFinetune(L.LightningModule):
 
     def __init__(
         self,
-        module_kwargs: dict[str, Any],  # Already provided in checkpoints of Moirai classes
+        module_kwargs: dict[
+            str, Any
+        ],  # Already provided in checkpoints of Moirai classes
         llm_kwargs: dict[str, Any],
         proj_kwargs: dict[str, Any],
         lora_kwargs: dict[str, Any],
-        task_kwargs: dict[str, Any],  # If not provided, follow MoiraiFinetune's training strategy
+        task_kwargs: dict[
+            str, Any
+        ],  # If not provided, follow MoiraiFinetune's training strategy
         data: str,
         min_patches: int,
         min_mask_ratio: float,
@@ -146,7 +153,7 @@ class LlmMoiraiFinetune(L.LightningModule):
         lr: float = 1e-3,
         weight_decay: float = 1e-2,
         log_on_step: bool = False,
-        moirai_opt_mode: str = 'freeze',
+        moirai_opt_mode: str = "freeze",
     ):
 
         assert (
@@ -160,39 +167,49 @@ class LlmMoiraiFinetune(L.LightningModule):
         self.module = MoiraiModule(**module_kwargs)
 
         # Set params related to LLM.
-        self.d_llm = llm_kwargs['d_llm']
-        self.llm_layers = llm_kwargs['llm_layers']
+        self.d_llm = llm_kwargs["d_llm"]
+        self.llm_layers = llm_kwargs["llm_layers"]
 
         # Type of projector
-        self.proj_type = proj_kwargs['projector']
+        self.proj_type = proj_kwargs["projector"]
 
         # Load dataset description based on 'data'
         self.data_description = get_data_description(data)
 
         # Set params related to the forecasting task.
-        if task_kwargs['use_specified_task_config']:
-            self.patch_size = task_kwargs['patch_size']
-            self.prediction_length = task_kwargs['prediction_length']
-            self.context_length = task_kwargs['context_length']
+        if task_kwargs["use_specified_task_config"]:
+            self.patch_size = task_kwargs["patch_size"]
+            self.prediction_length = task_kwargs["prediction_length"]
+            self.context_length = task_kwargs["context_length"]
         else:
-            self.patch_size, self.prediction_length, self.context_length = None, None, None
+            self.patch_size, self.prediction_length, self.context_length = (
+                None,
+                None,
+                None,
+            )
 
         # Lora config
-        if lora_kwargs['use_lora']:
-            lora_kwargs.pop('use_lora')
+        if lora_kwargs["use_lora"]:
+            lora_kwargs.pop("use_lora")
             self.lora_config = LoraConfig(**lora_kwargs)
 
     def init_after_loading_moirai(self):
         # Initialize the pretrained LLM and tokenizer.
-        self.llm_model = self._set_llm_model(self.hparams.llm_kwargs['llm_model'])  # LLM is frozen
-        self.llm_tokenizer = self._set_llm_tokenizer(self.hparams.llm_kwargs['llm_model'])
+        self.llm_model = self._set_llm_model(
+            self.hparams.llm_kwargs["llm_model"]
+        )  # LLM is frozen
+        self.llm_tokenizer = self._set_llm_tokenizer(
+            self.hparams.llm_kwargs["llm_model"]
+        )
         # See https://huggingface.co/docs/transformers/main/en/model_doc/llama3
-        if self.hparams.llm_kwargs['llm_model'] == 'LLAMA3':
+        if self.hparams.llm_kwargs["llm_model"] == "LLAMA3":
             self.llm_model.resize_token_embeddings(len(self.llm_tokenizer))
             self.llm_model.config.pad_token_id = self.llm_tokenizer.pad_token_id
-            self.llm_model.embed_tokens = nn.Embedding(self.llm_model.config.vocab_size,
-                                                       self.llm_model.config.hidden_size,
-                                                       padding_idx=self.llm_model.config.pad_token_id)
+            self.llm_model.embed_tokens = nn.Embedding(
+                self.llm_model.config.vocab_size,
+                self.llm_model.config.hidden_size,
+                padding_idx=self.llm_model.config.pad_token_id,
+            )
 
         # Todo: By default, Moirai uses multiple patch size for projection. Randomly select patch size for samples.
         #  If finetune with multi patch size, we need multiple Linear layers to project r_txt to TS patch.
@@ -202,27 +219,34 @@ class LlmMoiraiFinetune(L.LightningModule):
         #  For now, we only consider passing specified configs and using 1 Linear layer for simplicity.
 
         # Initialize projector
-        if self.proj_type == 'Linear':
-            self.projector = LinearProjector(in_features=self.d_llm,
-                                             out_features=self.patch_size,
-                                             dropout=self.hparams.proj_kwargs['dropout'],
-                                             bias=self.hparams.proj_kwargs['bias'])
+        if self.proj_type == "Linear":
+            self.projector = LinearProjector(
+                in_features=self.d_llm,
+                out_features=self.patch_size,
+                dropout=self.hparams.proj_kwargs["dropout"],
+                bias=self.hparams.proj_kwargs["bias"],
+            )
 
-        elif self.proj_type == 'Resampler':
-            self.projector = nn.Sequential(PerceiverResampler(dim=self.d_llm,
-                                                              depth=3,
-                                                              dim_head=64,
-                                                              heads=8,
-                                                              num_queries=self.hparams.proj_kwargs['num_queries'],
-                                                              max_seq_len=512,
-                                                              ff_mult=2),
-                                           LinearProjector(in_features=self.d_llm,
-                                                           out_features=self.patch_size,
-                                                           dropout=self.hparams.proj_kwargs['dropout'],
-                                                           bias=self.hparams.proj_kwargs['bias'])
-                                           )
+        elif self.proj_type == "Resampler":
+            self.projector = nn.Sequential(
+                PerceiverResampler(
+                    dim=self.d_llm,
+                    depth=3,
+                    dim_head=64,
+                    heads=8,
+                    num_queries=self.hparams.proj_kwargs["num_queries"],
+                    max_seq_len=512,
+                    ff_mult=2,
+                ),
+                LinearProjector(
+                    in_features=self.d_llm,
+                    out_features=self.patch_size,
+                    dropout=self.hparams.proj_kwargs["dropout"],
+                    bias=self.hparams.proj_kwargs["bias"],
+                ),
+            )
 
-        elif self.proj_type == 'Honeybee':
+        elif self.proj_type == "Honeybee":
             pass  # ToDo: D-abstractor
         else:
             raise ValueError("Unknown projector type")
@@ -233,14 +257,14 @@ class LlmMoiraiFinetune(L.LightningModule):
             print_trainable_parameters(self.module)
 
     def forward(
-            self,
-            target: Float[torch.Tensor, "*batch seq_len max_patch"],
-            observed_mask: Bool[torch.Tensor, "*batch seq_len max_patch"],
-            sample_id: Int[torch.Tensor, "*batch seq_len"],
-            time_id: Int[torch.Tensor, "*batch seq_len"],
-            variate_id: Int[torch.Tensor, "*batch seq_len"],
-            prediction_mask: Bool[torch.Tensor, "*batch seq_len"],
-            patch_size: Int[torch.Tensor, "*batch seq_len"],
+        self,
+        target: Float[torch.Tensor, "*batch seq_len max_patch"],
+        observed_mask: Bool[torch.Tensor, "*batch seq_len max_patch"],
+        sample_id: Int[torch.Tensor, "*batch seq_len"],
+        time_id: Int[torch.Tensor, "*batch seq_len"],
+        variate_id: Int[torch.Tensor, "*batch seq_len"],
+        prediction_mask: Bool[torch.Tensor, "*batch seq_len"],
+        patch_size: Int[torch.Tensor, "*batch seq_len"],
     ):
 
         # ToDo: ======== Now it is only for uni-variate. Not flatten multi-variate. =======
@@ -249,10 +273,14 @@ class LlmMoiraiFinetune(L.LightningModule):
 
         #  Get LLM reprs of prompt.
         #  ToDo: Need to process prompt_len. max_length=2048 is not compatible with Moirai's max_length.
-        prompt = self.llm_tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048)
+        prompt = self.llm_tokenizer(
+            prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048
+        )
         prompt = prompt.to(self.llm_model.device)
-        prompt_reprs = self.llm_model(input_ids=prompt.input_ids, #  (bs, num_prompt_patches, d_llm)
-                                      attention_mask=prompt.attention_mask).last_hidden_state
+        prompt_reprs = self.llm_model(
+            input_ids=prompt.input_ids,  #  (bs, num_prompt_patches, d_llm)
+            attention_mask=prompt.attention_mask,
+        ).last_hidden_state
 
         # ToDo: Add a Q-former/Some module to reduce prompt length to a fixed length!
         #  Samples from different batches have different prompt length.
@@ -260,31 +288,47 @@ class LlmMoiraiFinetune(L.LightningModule):
 
         # Use projector to map r_t to p_t. Prompt tokens are in the same space of TS patches.
         if isinstance(self.patch_size, int):
-            prompt_tokens = self.projector(prompt_reprs)  # (bs, num_prompt_patches, patch_size)
+            prompt_tokens = self.projector(
+                prompt_reprs
+            )  # (bs, num_prompt_patches, patch_size)
         else:
             # Todo: Use the specific patch_size for each sample...
             prompt_tokens = self.projector[patch_size](prompt_reprs)
 
-
         # ToDo: Make prompt tokens have the same loc and std of context ts
-        prompt_tokens = self.rescale(prompt_tokens, target, observed_mask, prediction_mask, sample_id, variate_id)
-
+        prompt_tokens = self.rescale(
+            prompt_tokens, target, observed_mask, prediction_mask, sample_id, variate_id
+        )
 
         batch_size = prompt_tokens.size(0)
         num_prompt_tokens = prompt_tokens.size(1)
 
         # Modify the masks and ids before prepending:
         # Pad last dim of prompt_tokens to max_patch_size.
-        padded_prompt_prefix = torch.zeros((prompt_tokens.size(0), prompt_tokens.size(1), max(self.module.patch_sizes)),
-                                           dtype=prompt_tokens.dtype,
-                                           device=target.device)
-        padded_prompt_prefix[:, :, :prompt_tokens.size(2)] = prompt_tokens  # (bs, num_prompt_patches, max_patch_size)
+        padded_prompt_prefix = torch.zeros(
+            (
+                prompt_tokens.size(0),
+                prompt_tokens.size(1),
+                max(self.module.patch_sizes),
+            ),
+            dtype=prompt_tokens.dtype,
+            device=target.device,
+        )
+        padded_prompt_prefix[:, :, : prompt_tokens.size(2)] = (
+            prompt_tokens  # (bs, num_prompt_patches, max_patch_size)
+        )
 
         # Create observed_mask for prompt tokens.
-        prompt_observed_mask = torch.zeros((prompt_tokens.size(0), prompt_tokens.size(1), max(self.module.patch_sizes)),
-                                           dtype=observed_mask.dtype,
-                                           device=observed_mask.device)
-        prompt_observed_mask[:, :, :prompt_tokens.size(2)] = True
+        prompt_observed_mask = torch.zeros(
+            (
+                prompt_tokens.size(0),
+                prompt_tokens.size(1),
+                max(self.module.patch_sizes),
+            ),
+            dtype=observed_mask.dtype,
+            device=observed_mask.device,
+        )
+        prompt_observed_mask[:, :, : prompt_tokens.size(2)] = True
 
         # Prepend prompt tokens to TS patches.
         target = torch.cat([padded_prompt_prefix, target], dim=1)
@@ -292,8 +336,15 @@ class LlmMoiraiFinetune(L.LightningModule):
 
         # Create sample_id for prompt and prepend. Not using packing, so all sample_id are 1.
         sample_id = torch.cat(
-            [torch.ones((batch_size, num_prompt_tokens), dtype=sample_id.dtype, device=sample_id.device), sample_id],
-            dim=1
+            [
+                torch.ones(
+                    (batch_size, num_prompt_tokens),
+                    dtype=sample_id.dtype,
+                    device=sample_id.device,
+                ),
+                sample_id,
+            ],
+            dim=1,
         )
 
         # Todo: For uni-channel are as below. How to deal with flatten multi-channel? prompt as a new variate?
@@ -301,38 +352,50 @@ class LlmMoiraiFinetune(L.LightningModule):
         # Then prepend it with prompt time_id: [0,..., num_prompt_tokens].
         # No sequence packing, so no worry about the ending patches are padded and with time id of zeros.
         time_id = torch.cat(
-            [torch.arange(0, num_prompt_tokens, dtype=time_id.dtype, device=time_id.device).repeat(time_id.size(0), 1),
-             time_id + num_prompt_tokens],
-            dim=1
+            [
+                torch.arange(
+                    0, num_prompt_tokens, dtype=time_id.dtype, device=time_id.device
+                ).repeat(time_id.size(0), 1),
+                time_id + num_prompt_tokens,
+            ],
+            dim=1,
         )
 
         # ToDo: For uni-channel, duplicate. For flatten multi-channel, create a new variate.
         #  Cannot be the same as the ones in existing variates. Need to be in the max_dim range.
         variate_id = repeat(
             variate_id[:, 0],
-            'batch -> batch seq_len',
-            seq_len=variate_id.shape[1] + num_prompt_tokens
+            "batch -> batch seq_len",
+            seq_len=variate_id.shape[1] + num_prompt_tokens,
         )
 
         prediction_mask = torch.cat(
-            [torch.zeros((batch_size, num_prompt_tokens), dtype=prediction_mask.dtype, device=prediction_mask.device),
-             prediction_mask],
-            dim=1
+            [
+                torch.zeros(
+                    (batch_size, num_prompt_tokens),
+                    dtype=prediction_mask.dtype,
+                    device=prediction_mask.device,
+                ),
+                prediction_mask,
+            ],
+            dim=1,
         )
 
         patch_size = repeat(
             patch_size[:, 0],
-            'batch -> batch seq_len',
-            seq_len=patch_size.shape[1] + num_prompt_tokens
+            "batch -> batch seq_len",
+            seq_len=patch_size.shape[1] + num_prompt_tokens,
         )
 
-        prompt_batch = {"target": target,
-                        "prediction_mask": prediction_mask,
-                        "observed_mask": observed_mask,
-                        "sample_id": sample_id,
-                        "time_id": time_id,
-                        "variate_id": variate_id,
-                        "patch_size": patch_size}
+        prompt_batch = {
+            "target": target,
+            "prediction_mask": prediction_mask,
+            "observed_mask": observed_mask,
+            "sample_id": sample_id,
+            "time_id": time_id,
+            "variate_id": variate_id,
+            "patch_size": patch_size,
+        }
 
         distr = self.module(
             target=target,
@@ -345,20 +408,22 @@ class LlmMoiraiFinetune(L.LightningModule):
         )
 
         loss = self.hparams.loss_func(
-                pred=distr,
-                target=target,
-                prediction_mask=prediction_mask,
-                observed_mask=observed_mask,
-                sample_id=sample_id,
-                variate_id=variate_id,
-            )
+            pred=distr,
+            target=target,
+            prediction_mask=prediction_mask,
+            observed_mask=observed_mask,
+            sample_id=sample_id,
+            variate_id=variate_id,
+        )
 
         return distr, loss, prompt_batch
 
     #     preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
     #     return rearrange(preds, "n b ... -> b n ...")
 
-    def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def training_step(
+        self, batch: dict[str, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
         self.llm_model.eval()
 
         distr, loss, prompt_batch = self(
@@ -381,7 +446,9 @@ class LlmMoiraiFinetune(L.LightningModule):
         )
         return loss
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+    def validation_step(
+        self, batch: dict[str, torch.Tensor], batch_idx: int
+    ) -> torch.Tensor:
         distr, val_loss, prompt_batch = self(
             **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
         )
@@ -455,33 +522,33 @@ class LlmMoiraiFinetune(L.LightningModule):
         # ToDo: Partial finetuning is not a good practice? Use Lora.
         # Set all params except the ones in projector to Non-trainable
         for pn, p in self.named_parameters():
-            if not pn.startswith('projector'):
+            if not pn.startswith("projector"):
                 p.requires_grad = False
 
         # 1. Freeze Moirai
-        if self.hparams.moirai_opt_mode == 'freeze':
+        if self.hparams.moirai_opt_mode == "freeze":
             pass
         # 2. Fully finetune Moirai
-        elif self.hparams.moirai_opt_mode == 'full':
+        elif self.hparams.moirai_opt_mode == "full":
             for pn, p in self.named_parameters():
-                if pn.startswith('module'):
+                if pn.startswith("module"):
                     p.requires_grad = True
         # 3. Partially finetune Moirai
         else:
             for mn, m in self.named_modules():
-                if mn.startswith('module'):
+                if mn.startswith("module"):
                     # Finetune Norm layers
-                    if 'Norm' in self.hparams.moirai_opt_mode:
+                    if "Norm" in self.hparams.moirai_opt_mode:
                         if isinstance(m, RMSNorm):
                             for pn, p in m.named_parameters():
                                 p.requires_grad = True
                     # Finetune Input Projection layers
-                    if 'InProject' in self.hparams.moirai_opt_mode:
+                    if "InProject" in self.hparams.moirai_opt_mode:
                         if isinstance(m, MultiInSizeLinear):
                             for pn, p in m.named_parameters():
                                 p.requires_grad = True
                     # Finetune Output Projection layers
-                    if 'OutProject' in self.hparams.moirai_opt_mode:
+                    if "OutProject" in self.hparams.moirai_opt_mode:
                         if isinstance(m, MultiOutSizeLinear):
                             for pn, p in m.named_parameters():
                                 p.requires_grad = True
@@ -514,9 +581,13 @@ class LlmMoiraiFinetune(L.LightningModule):
                 fpn = f"{mn}.{pn}" if mn else pn
                 if pn.endswith("bias"):  # All bias no decay
                     no_decay.add(fpn)
-                elif pn.endswith("weight") and isinstance(m, whitelist_params):  # Weights in white decay
+                elif pn.endswith("weight") and isinstance(
+                    m, whitelist_params
+                ):  # Weights in white decay
                     decay.add(fpn)
-                elif pn.endswith("weight") and isinstance(m, blacklist_params):  # Weights in black no decay
+                elif pn.endswith("weight") and isinstance(
+                    m, blacklist_params
+                ):  # Weights in black no decay
                     no_decay.add(fpn)
 
         # validate that we considered every parameter
@@ -559,15 +630,28 @@ class LlmMoiraiFinetune(L.LightningModule):
             },
         }
 
-    def rescale(self, prompt_tokens, target, observed_mask, prediction_mask, sample_id, variate_id):
+    def rescale(
+        self,
+        prompt_tokens,
+        target,
+        observed_mask,
+        prediction_mask,
+        sample_id,
+        variate_id,
+    ):
         with torch.no_grad():
             loc_, scale_ = self.module.scaler(
                 target,
-                observed_mask * ~prediction_mask.unsqueeze(-1),  # Observed and not in prediction range
+                observed_mask
+                * ~prediction_mask.unsqueeze(
+                    -1
+                ),  # Observed and not in prediction range
                 sample_id,
                 variate_id,
             )
-            loc, scale = loc_.mean(dim=1, keepdim=False), scale_.mean(dim=1, keepdim=False)
+            loc, scale = loc_.mean(dim=1, keepdim=False), scale_.mean(
+                dim=1, keepdim=False
+            )
         # (bs, n_promt, ps)
         # Example shapes
         bs, num_patch, patch_size = prompt_tokens.shape
@@ -591,34 +675,31 @@ class LlmMoiraiFinetune(L.LightningModule):
 
         return processed_tokens
 
-
-
-
     def _set_llm_model(self, llm_model):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
-        if llm_model == 'LLAMA3':
-            self.llama_config = AutoConfig.from_pretrained('meta-llama/Meta-Llama-3-8B')
+        if llm_model == "LLAMA3":
+            self.llama_config = AutoConfig.from_pretrained("meta-llama/Meta-Llama-3-8B")
             self.llama_config.num_hidden_layers = self.llm_layers
             self.llama_config.output_attentions = True
             self.llama_config.output_hidden_states = True
 
             llm_model = AutoModelForCausalLM.from_pretrained(
-                    "meta-llama/Meta-Llama-3-8B",
-                    torch_dtype=torch.bfloat16,
-                    device_map="auto",
-                    config=self.llama_config,
+                "meta-llama/Meta-Llama-3-8B",
+                torch_dtype=torch.bfloat16,
+                device_map="auto",
+                config=self.llama_config,
             )
 
-        if llm_model == 'LLAMA2':
-            self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
+        if llm_model == "LLAMA2":
+            self.llama_config = LlamaConfig.from_pretrained("huggyllama/llama-7b")
             self.llama_config.num_hidden_layers = self.llm_layers
             self.llama_config.output_attentions = True
             self.llama_config.output_hidden_states = True
             try:
                 llm_model = LlamaModel.from_pretrained(
-                    'huggyllama/llama-7b',
+                    "huggyllama/llama-7b",
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.llama_config,
@@ -628,7 +709,7 @@ class LlmMoiraiFinetune(L.LightningModule):
             except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 llm_model = LlamaModel.from_pretrained(
-                    'huggyllama/llama-7b',
+                    "huggyllama/llama-7b",
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.llama_config,
@@ -636,14 +717,14 @@ class LlmMoiraiFinetune(L.LightningModule):
                     # load_in_4bit=True
                 )
 
-        elif llm_model == 'GPT2':
-            self.gpt2_config = GPT2Config.from_pretrained('openai-community/gpt2')
+        elif llm_model == "GPT2":
+            self.gpt2_config = GPT2Config.from_pretrained("openai-community/gpt2")
             self.gpt2_config.num_hidden_layers = self.llm_layers
             self.gpt2_config.output_attentions = True
             self.gpt2_config.output_hidden_states = True
             try:
                 llm_model = GPT2Model.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.gpt2_config,
@@ -651,20 +732,22 @@ class LlmMoiraiFinetune(L.LightningModule):
             except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 llm_model = GPT2Model.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.gpt2_config,
                 )
 
-        elif llm_model == 'BERT':
-            self.bert_config = BertConfig.from_pretrained('google-bert/bert-base-uncased')
+        elif llm_model == "BERT":
+            self.bert_config = BertConfig.from_pretrained(
+                "google-bert/bert-base-uncased"
+            )
             self.bert_config.num_hidden_layers = self.llm_layers
             self.bert_config.output_attentions = True
             self.bert_config.output_hidden_states = True
             try:
                 llm_model = BertModel.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
                     local_files_only=True,
                     config=self.bert_config,
@@ -672,13 +755,13 @@ class LlmMoiraiFinetune(L.LightningModule):
             except EnvironmentError:  # downloads model from HF is not already done
                 print("Local model files not found. Attempting to download...")
                 llm_model = BertModel.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
                     local_files_only=False,
                     config=self.bert_config,
                 )
         else:
-            raise Exception('LLM model is not defined')
+            raise Exception("LLM model is not defined")
 
         # Freeze LLM's parameters
         for param in llm_model.parameters():
@@ -690,60 +773,64 @@ class LlmMoiraiFinetune(L.LightningModule):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
-        if llm_model == 'LLAMA3':
+        if llm_model == "LLAMA3":
             tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 
-        elif llm_model == 'LLAMA2':
+        elif llm_model == "LLAMA2":
             try:
                 tokenizer = LlamaTokenizer.from_pretrained(
-                    'huggyllama/llama-7b',
-                    trust_remote_code=True,
-                    local_files_only=True
+                    "huggyllama/llama-7b", trust_remote_code=True, local_files_only=True
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+            except (
+                EnvironmentError
+            ):  # downloads the tokenizer from HF if not already done
                 print("Local tokenizer files not found. Atempting to download them..")
                 tokenizer = LlamaTokenizer.from_pretrained(
-                    'huggyllama/llama-7b',
+                    "huggyllama/llama-7b",
                     trust_remote_code=True,
-                    local_files_only=False
+                    local_files_only=False,
                 )
 
-        elif llm_model == 'GPT2':
+        elif llm_model == "GPT2":
             try:
                 tokenizer = GPT2Tokenizer.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
-                    local_files_only=True
+                    local_files_only=True,
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+            except (
+                EnvironmentError
+            ):  # downloads the tokenizer from HF if not already done
                 print("Local tokenizer files not found. Atempting to download them..")
                 tokenizer = GPT2Tokenizer.from_pretrained(
-                    'openai-community/gpt2',
+                    "openai-community/gpt2",
                     trust_remote_code=True,
-                    local_files_only=False
+                    local_files_only=False,
                 )
-        elif llm_model == 'BERT':
+        elif llm_model == "BERT":
             try:
                 tokenizer = BertTokenizer.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
-                    local_files_only=True
+                    local_files_only=True,
                 )
-            except EnvironmentError:  # downloads the tokenizer from HF if not already done
+            except (
+                EnvironmentError
+            ):  # downloads the tokenizer from HF if not already done
                 print("Local tokenizer files not found. Atempting to download them..")
                 tokenizer = BertTokenizer.from_pretrained(
-                    'google-bert/bert-base-uncased',
+                    "google-bert/bert-base-uncased",
                     trust_remote_code=True,
-                    local_files_only=False
+                    local_files_only=False,
                 )
         else:
-            raise Exception('LLM model is not defined')
+            raise Exception("LLM model is not defined")
 
         if tokenizer.eos_token:
             tokenizer.pad_token = tokenizer.eos_token
         else:
-            pad_token = '[PAD]'
-            tokenizer.add_special_tokens({'pad_token': pad_token})
+            pad_token = "[PAD]"
+            tokenizer.add_special_tokens({"pad_token": pad_token})
             tokenizer.pad_token = pad_token
 
         return tokenizer
@@ -753,9 +840,7 @@ class LlmMoiraiFinetune(L.LightningModule):
         prompt = []
         for b in range(target.size(0)):
             # Dataset Description
-            prompt_ = (
-                f"<|start_prompt|>Dataset description: {self.data_description};"
-            )
+            prompt_ = f"<|start_prompt|>Dataset description: {self.data_description};"
 
             # Task description if task params are known.
             if self.prediction_length and self.context_length:
@@ -769,8 +854,12 @@ class LlmMoiraiFinetune(L.LightningModule):
             # if self.hparams.prompt_statistics:
 
             # Mask indicating the observed tokens in context range for a sample b.
-            mask = observed_mask[b] & ~prediction_mask[b].unsqueeze(-1).expand_as(observed_mask[b])
-            valid_target = target[b][mask]  # A 1D tensor with observed context time steps
+            mask = observed_mask[b] & ~prediction_mask[b].unsqueeze(-1).expand_as(
+                observed_mask[b]
+            )
+            valid_target = target[b][
+                mask
+            ]  # A 1D tensor with observed context time steps
             min_value = torch.min(valid_target).item()
             max_value = torch.max(valid_target).item()
             median = torch.median(valid_target).item()
@@ -781,12 +870,14 @@ class LlmMoiraiFinetune(L.LightningModule):
             max_value_str = str(round(max_value, 4))
             median_value_str = str(round(median, 4))
             lags_values_str = str(lags.tolist())
-            prompt_ += (f"Input statistics: "
-                        f"min value {min_value_str}, "
-                        f"max value {max_value_str}, "
-                        f"median value {median_value_str}, "
-                        f"the trend of input is {'upward' if trend > 0 else 'downward'}, "
-                        f"top 5 lags are : {lags_values_str};")
+            prompt_ += (
+                f"Input statistics: "
+                f"min value {min_value_str}, "
+                f"max value {max_value_str}, "
+                f"median value {median_value_str}, "
+                f"the trend of input is {'upward' if trend > 0 else 'downward'}, "
+                f"top 5 lags are : {lags_values_str};"
+            )
 
             prompt_ += "<|<end_prompt>|>"
             prompt.append(prompt_)
@@ -795,14 +886,18 @@ class LlmMoiraiFinetune(L.LightningModule):
 
     @property
     def num_time_patches(self):
-        return math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
+        return math.ceil(self.context_length / self.patch_size) + math.ceil(
+            self.prediction_length / self.patch_size
+        )
 
     @property
     def is_specified_all_config(self):
         return self.context_length and self.prediction_length and self.patch_size
 
     @property
-    def train_transform_map(self,) -> dict[str | type, Callable[..., Transformation]]:
+    def train_transform_map(
+        self,
+    ) -> dict[str | type, Callable[..., Transformation]]:
         """
         Transformation per sample for train dataset.
         Called in cli/train.py to process the training dataset.
@@ -810,18 +905,31 @@ class LlmMoiraiFinetune(L.LightningModule):
         If 'wide_multivariate', each data_entry is the entire records of all the channels.
         Initially, each 'target' is [(L, ), ..., (L, )], as _pa_column_to_numpy of HuggingFaceDatasetIndexer.
         """
+
         def default_train_transform():
             return (
                 GetPatchSize(
                     min_time_patches=self.hparams.min_patches,
                     target_field="target",
                     patch_sizes=self.module.patch_sizes,
-                    patch_size_constraints=FixedPatchSizeConstraints(self.patch_size) if self.patch_size else DefaultPatchSizeConstraints(),
+                    patch_size_constraints=(
+                        FixedPatchSizeConstraints(self.patch_size)
+                        if self.patch_size
+                        else DefaultPatchSizeConstraints()
+                    ),
                     offset=True,
                 )
                 + SpecifiedPatchCrop(
-                    min_time_patches=self.hparams.min_patches if not self.is_specified_all_config else self.num_time_patches,
-                    max_time_patches=None if not self.is_specified_all_config else self.num_time_patches,
+                    min_time_patches=(
+                        self.hparams.min_patches
+                        if not self.is_specified_all_config
+                        else self.num_time_patches
+                    ),
+                    max_time_patches=(
+                        None
+                        if not self.is_specified_all_config
+                        else self.num_time_patches
+                    ),
                     max_patches=self.module.max_seq_len,
                     will_flatten=True,
                     offset=True,
@@ -891,22 +999,36 @@ class LlmMoiraiFinetune(L.LightningModule):
                 # Mask ratio is uniformly sampled from [min_mask_ratio, max_mask_ratio]
                 # For truncate_fields, truncate the part corresponding to prediction patches.
                 # If no specific prediction length, different samples have different prediction masks?
-                + (MaskedPrediction(
-                    min_mask_ratio=self.hparams.min_mask_ratio,
-                    max_mask_ratio=self.hparams.max_mask_ratio,
-                    target_field="target",
-                    truncate_fields=("variate_id", "time_id", "sample_id", "observed_mask"),
-                    optional_truncate_fields=("past_feat_dynamic_real",),
-                    prediction_mask_field="prediction_mask",
-                    expected_ndim=3,
-                ) if self.prediction_length is None else EvalMaskedPrediction(
-                    mask_length=math.ceil(self.prediction_length / self.patch_size),
-                    target_field="target",
-                    truncate_fields=("variate_id", "time_id", "sample_id", "observed_mask"),
-                    optional_truncate_fields=("past_feat_dynamic_real",),
-                    prediction_mask_field="prediction_mask",
-                    expected_ndim=3,
-                ))
+                + (
+                    MaskedPrediction(
+                        min_mask_ratio=self.hparams.min_mask_ratio,
+                        max_mask_ratio=self.hparams.max_mask_ratio,
+                        target_field="target",
+                        truncate_fields=(
+                            "variate_id",
+                            "time_id",
+                            "sample_id",
+                            "observed_mask",
+                        ),
+                        optional_truncate_fields=("past_feat_dynamic_real",),
+                        prediction_mask_field="prediction_mask",
+                        expected_ndim=3,
+                    )
+                    if self.prediction_length is None
+                    else EvalMaskedPrediction(
+                        mask_length=math.ceil(self.prediction_length / self.patch_size),
+                        target_field="target",
+                        truncate_fields=(
+                            "variate_id",
+                            "time_id",
+                            "sample_id",
+                            "observed_mask",
+                        ),
+                        optional_truncate_fields=("past_feat_dynamic_real",),
+                        prediction_mask_field="prediction_mask",
+                        expected_ndim=3,
+                    )
+                )
                 # Extend prediction_mask for "past_feat_dynamic_real" (If it exists)
                 # set another prediction mask with all False for it in field "prediction_mask".
                 # So there will be 2 items in field "prediction_mask".
@@ -950,10 +1072,12 @@ class LlmMoiraiFinetune(L.LightningModule):
         return defaultdict(lambda: default_train_transform)
 
     @property
-    def val_transform_map(self,) -> dict[str | type, Callable[..., Transformation]]:
+    def val_transform_map(
+        self,
+    ) -> dict[str | type, Callable[..., Transformation]]:
         def default_val_transform(
-            offset: int,               # Offset to val split. Range after offset is used.
-            distance: int,             # distance bt prediction windows, equal to prediction_length
+            offset: int,  # Offset to val split. Range after offset is used.
+            distance: int,  # distance bt prediction windows, equal to prediction_length
             prediction_length: int,
             context_length: int,
             patch_size: int,

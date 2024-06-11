@@ -17,7 +17,7 @@ import hydra
 import torch
 from gluonts.time_feature import get_seasonality
 from hydra.core.hydra_config import HydraConfig
-from hydra.utils import call, instantiate, get_class
+from hydra.utils import call, instantiate
 from omegaconf import DictConfig
 from torch.utils.tensorboard import SummaryWriter
 

@@ -122,9 +122,12 @@ def main(cfg: DictConfig):
         torch.backends.cuda.matmul.allow_tf32 = True
         torch.backends.cudnn.allow_tf32 = True
 
-    model: L.LightningModule = instantiate(cfg.model, _convert_="all",
-                                           data=cfg.data.dataset,
-                                           task_kwargs=instantiate(cfg.task))
+    model: L.LightningModule = instantiate(
+        cfg.model,
+        _convert_="all",
+        data=cfg.data.dataset,
+        task_kwargs=instantiate(cfg.task),
+    )
     model.init_after_loading_moirai()
     if cfg.compile:
         model.module.compile(mode=cfg.compile)

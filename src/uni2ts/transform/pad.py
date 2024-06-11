@@ -103,6 +103,7 @@ class EvalPad(MapFuncMixin, Transformation):
         arr = np.pad(arr, pad_width, mode="constant", constant_values=np.nan)
         return arr
 
+
 @dataclass
 class PadOutRangeTokens(MapFuncMixin, Transformation):
     prediction_pad: int
@@ -121,6 +122,6 @@ class PadOutRangeTokens(MapFuncMixin, Transformation):
 
     def map(self, data_entry: dict[str, Any], field: str) -> Any:
         arr = data_entry[field]
-        arr[:, :self.context_pad] = np.nan
-        arr[:, -self.prediction_pad:] = np.nan
+        arr[:, : self.context_pad] = np.nan
+        arr[:, -self.prediction_pad :] = np.nan
         return arr

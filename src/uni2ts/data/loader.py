@@ -126,7 +126,9 @@ class PackCollate(Collate):
         batch = sorted(
             batch, key=lambda sample: len(sample[self.target_field]), reverse=True
         )
-        bin_spaces: Int[np.ndarray, "batch"] = np.full(len(batch), self.max_length)  # 2 args are shape and fill_value
+        bin_spaces: Int[np.ndarray, "batch"] = np.full(
+            len(batch), self.max_length
+        )  # 2 args are shape and fill_value
         packed_batch: list[list[Sample]] = [[]]
 
         for sample in batch:
@@ -277,7 +279,9 @@ class _BatchedSampleIterator:
     batch_size: int
     drop_last: bool
     fill_last: bool
-    pad_func_map: Optional[dict[str, Callable[[Sequence[int], np.dtype], np.ndarray]]]=None
+    pad_func_map: Optional[
+        dict[str, Callable[[Sequence[int], np.dtype], np.ndarray]]
+    ] = None
 
     def __post_init__(self):
         self.queue = BatchedSampleQueue()
@@ -325,6 +329,7 @@ class _BatchedSampleIterator:
                 return False
         return True
 
+
 pad_func_map: dict[str, Callable[[Sequence[int], np.dtype], np.ndarray]] = {
     "target": np.zeros,
     "observed_mask": np.zeros,
@@ -333,6 +338,7 @@ pad_func_map: dict[str, Callable[[Sequence[int], np.dtype], np.ndarray]] = {
     "prediction_mask": np.zeros,
     "patch_size": np.zeros,
 }
+
 
 class DataLoader:  # Used in Pretrain and Finetune.
     def __init__(
@@ -358,7 +364,9 @@ class DataLoader:  # Used in Pretrain and Finetune.
 
         self.dataloader = TorchDataLoader(
             dataset=dataset,
-            batch_size=int(batch_size * batch_size_factor),  # number of samples (unpacked) for a mini batch
+            batch_size=int(
+                batch_size * batch_size_factor
+            ),  # number of samples (unpacked) for a mini batch
             shuffle=shuffle,
             sampler=sampler,
             num_workers=num_workers,
@@ -369,7 +377,9 @@ class DataLoader:  # Used in Pretrain and Finetune.
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
             persistent_workers=persistent_workers and num_workers > 0,
         )
-        self.batch_size = batch_size  # number of packed samples/bins in a mini batch (bs in forward)
+        self.batch_size = (
+            batch_size  # number of packed samples/bins in a mini batch (bs in forward)
+        )
         self.cycle = cycle
         self.num_batches_per_epoch = num_batches_per_epoch
         self.collate_fn = collate_fn
@@ -389,7 +399,11 @@ class DataLoader:  # Used in Pretrain and Finetune.
                 batch_size=self.batch_size,
                 drop_last=self.drop_last,
                 fill_last=self.fill_last,
-                pad_func_map=pad_func_map if self.collate_fn is None else self.collate_fn.pad_func_map,  # self.collate_fn.pad_func_map
+                pad_func_map=(
+                    pad_func_map
+                    if self.collate_fn is None
+                    else self.collate_fn.pad_func_map
+                ),  # self.collate_fn.pad_func_map
             )
         return itertools.islice(self.iterator, self.num_batches_per_epoch)
 

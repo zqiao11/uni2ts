@@ -92,8 +92,12 @@ class PackedStdScaler(PackedScaler):
     ]:
         # (bs, seq_len, sen_len). If i and j patches are from the same var and sample, then (i,j) is Ture
         id_mask = torch.logical_and(
-            torch.eq(sample_id.unsqueeze(-1), sample_id.unsqueeze(-2)),    # if i and j patches are from the same sample
-            torch.eq(variate_id.unsqueeze(-1), variate_id.unsqueeze(-2)),  # if i and j patches are from the same var
+            torch.eq(
+                sample_id.unsqueeze(-1), sample_id.unsqueeze(-2)
+            ),  # if i and j patches are from the same sample
+            torch.eq(
+                variate_id.unsqueeze(-1), variate_id.unsqueeze(-2)
+            ),  # if i and j patches are from the same var
         )
 
         # For each patch, compute the total num_obs/tokens from patches within the same variate and sample. (bs, P, 1)

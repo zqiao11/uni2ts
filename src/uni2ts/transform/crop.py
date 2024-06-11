@@ -70,7 +70,9 @@ class PatchCrop(MapFuncMixin, Transformation):
         field: list[UnivarTimeSeries] = data_entry[self.fields[0]]
         time = field[0].shape[0]  # num of time steps of one series
         nvar = (
-            sum(len(data_entry[f]) for f in self.fields)  # Qz: if data is wide, then it is 1.
+            sum(
+                len(data_entry[f]) for f in self.fields
+            )  # Qz: if data is wide, then it is 1.
             + sum(len(data_entry[f]) for f in self.optional_fields if f in data_entry)
             if self.will_flatten
             else 1
@@ -154,7 +156,9 @@ class SpecifiedPatchCrop(MapFuncMixin, Transformation):
         field: list[UnivarTimeSeries] = data_entry[self.fields[0]]
         time = field[0].shape[0]  # num of time steps of one series
         nvar = (
-            sum(len(data_entry[f]) for f in self.fields)  # Qz: if data is wide, then it is 1.
+            sum(
+                len(data_entry[f]) for f in self.fields
+            )  # Qz: if data is wide, then it is 1.
             + sum(len(data_entry[f]) for f in self.optional_fields if f in data_entry)
             if self.will_flatten
             else 1
@@ -193,7 +197,6 @@ class SpecifiedPatchCrop(MapFuncMixin, Transformation):
         return start, stop
 
 
-
 @dataclass
 class EvalCrop(MapFuncMixin, Transformation):
     offset: int
@@ -218,7 +221,9 @@ class EvalCrop(MapFuncMixin, Transformation):
         return [ts[a : b or None] for ts in data_entry[field]]
 
     def _get_boundaries(self, data_entry: dict[str, Any]) -> tuple[int, int]:
-        field: list[UnivarTimeSeries] = data_entry[self.fields[0]]  # whole target series
+        field: list[UnivarTimeSeries] = data_entry[
+            self.fields[0]
+        ]  # whole target series
         time = field[0].shape[0]  # length of target series
         window = data_entry["window"]  # window_id, created in dataset.EvalDataset()
         fcst_start = self.offset + window * self.distance

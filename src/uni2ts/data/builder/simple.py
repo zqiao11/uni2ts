@@ -147,7 +147,7 @@ class SimpleDatasetBuilder(DatasetBuilder):
         dataset_type: str,
         offset: Optional[int] = None,
         date_offset: Optional[pd.Timestamp] = None,
-        normalize: Optional[bool] = False
+        normalize: Optional[bool] = False,
     ):
         """
         Build a Hugging Face dataset based on the csv file of the entire TS dataset.
@@ -230,7 +230,13 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
     def __post_init__(self):
         self.storage_path = Path(self.storage_path)
 
-    def build_dataset(self, file: Path, dataset_type: str, mean: pd.Series = None, std: pd.Series = None):
+    def build_dataset(
+        self,
+        file: Path,
+        dataset_type: str,
+        mean: pd.Series = None,
+        std: pd.Series = None,
+    ):
         """
         Same as above. But no offset. Save the entire dataset.
         """
@@ -337,7 +343,7 @@ if __name__ == "__main__":
         dataset_type=args.dataset_type,
         offset=args.offset,
         date_offset=pd.Timestamp(args.date_offset) if args.date_offset else None,
-        normalize=args.normalize  # To align with LSF. Default is False
+        normalize=args.normalize,  # To align with LSF. Default is False
     )
 
     # Create a validation dataset if offset/data_offset is provided.
@@ -352,7 +358,9 @@ if __name__ == "__main__":
             prediction_length=None,
             context_length=None,
             patch_size=None,
-        ).build_dataset(file=Path(args.file_path),
-                        dataset_type=args.dataset_type,
-                        mean=train_dataset_builder.mean,
-                        std=train_dataset_builder.std)
+        ).build_dataset(
+            file=Path(args.file_path),
+            dataset_type=args.dataset_type,
+            mean=train_dataset_builder.mean,
+            std=train_dataset_builder.std,
+        )

@@ -45,7 +45,9 @@ class PackFields(CollectFuncMixin, Transformation):
     feat: bool = False
 
     def __post_init__(self):
-        self.pack_str: str = "* time feat" if self.feat else "* time"  # Pack along * dim.
+        self.pack_str: str = (
+            "* time feat" if self.feat else "* time"
+        )  # Pack along * dim.
 
     def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
         fields = self.collect_func_list(
@@ -112,6 +114,7 @@ class PackCollection(Transformation):
 class FlatPackCollection(Transformation):
     field: str
     feat: bool = False
+
     # Flatten along time/patch dimension, then pack.
     def __post_init__(self):
         self.pack_str: str = "* feat" if self.feat else "*"

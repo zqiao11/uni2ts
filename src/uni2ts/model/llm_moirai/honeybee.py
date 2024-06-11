@@ -1,17 +1,19 @@
 """Resampler-based projectors
 """
+
 import math
 from typing import Optional, Tuple
 
 import torch
-from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
-from transformers.pytorch_utils import find_pruneable_heads_and_indices, prune_linear_layer
-from transformers.configuration_utils import PretrainedConfig
-from transformers.models.deformable_detr import DeformableDetrConfig
 from torch import nn
+from transformers.configuration_utils import PretrainedConfig
+from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
 from transformers.modeling_utils import PreTrainedModel
-
-
+from transformers.models.deformable_detr import DeformableDetrConfig
+from transformers.pytorch_utils import (
+    find_pruneable_heads_and_indices,
+    prune_linear_layer,
+)
 
 """" D-Abstractor from Honeybee
 https://github.com/kakaobrain/honeybee/blob/main/honeybee/projectors/resamplers.py """
@@ -21,11 +23,11 @@ class HoneybeeConfig(PretrainedConfig):
     is_composition = True
 
     def __init__(
-            self,
-            vision_config: dict,
-            projector_config: dict,
-            lm_config: dict,
-            **kwargs,
+        self,
+        vision_config: dict,
+        projector_config: dict,
+        lm_config: dict,
+        **kwargs,
     ):
         """Honeybee model config.
 
@@ -64,7 +66,10 @@ class HoneybeeConfig(PretrainedConfig):
 
     @property
     def num_visual_tokens(self):
-        return self.projector_config.num_query_tokens + self.projector_config.num_eos_tokens
+        return (
+            self.projector_config.num_query_tokens
+            + self.projector_config.num_eos_tokens
+        )
 
     @property
     def hidden_size(self):
@@ -94,7 +99,9 @@ class HoneybeeConfig(PretrainedConfig):
         if "visual_projector_config" in config_dict:
             config_dict["projector_config"] = config_dict.pop("visual_projector_config")
             config_dict["projector_config"].pop("encoder_hidden_size")
-            config_dict["projector_config"]["num_query_tokens"] = config_dict.pop("num_query_tokens")
+            config_dict["projector_config"]["num_query_tokens"] = config_dict.pop(
+                "num_query_tokens"
+            )
 
         return super().from_dict(config_dict, **kwargs)
 
@@ -201,11 +208,15 @@ class HoneybeeVisualProjectorConfig(PretrainedConfig):
 
 
 def build_pos_embeds(
-        config: HoneybeeVisualProjectorConfig, num_input_tokens: int, vision_hidden_size: int
+    config: HoneybeeVisualProjectorConfig,
+    num_input_tokens: int,
+    vision_hidden_size: int,
 ):
     # pos emb
     if config.pos_emb:
-        pos_emb = torch.nn.Parameter(torch.zeros(1, num_input_tokens, vision_hidden_size))
+        pos_emb = torch.nn.Parameter(
+            torch.zeros(1, num_input_tokens, vision_hidden_size)
+        )
         nn.init.trunc_normal_(pos_emb, mean=0.0, std=0.02)
     else:
         pos_emb = None
@@ -217,12 +228,15 @@ def build_eos_tokens(config: HoneybeeVisualProjectorConfig, output_hidden_size: 
     # think tokens
     num_eos_tokens = config.num_eos_tokens
     if num_eos_tokens:
-        eos_tokens = torch.nn.Parameter(torch.randn(1, num_eos_tokens, output_hidden_size))
+        eos_tokens = torch.nn.Parameter(
+            torch.randn(1, num_eos_tokens, output_hidden_size)
+        )
         nn.init.trunc_normal_(eos_tokens, mean=0.0, std=config.initializer_range)
     else:
         eos_tokens = None
 
     return eos_tokens
+
 
 class HoneybeeVisualProjectorMLP(nn.Module):
     def __init__(self, config: HoneybeeVisualProjectorConfig):
@@ -280,7 +294,10 @@ class HoneybeeVisualProjectorMultiHeadAttention(nn.Module):
         return self.attention_map
 
     def transpose_for_scores(self, x):
-        new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+        new_x_shape = x.size()[:-1] + (
+            self.num_attention_heads,
+            self.attention_head_size,
+        )
         x = x.view(*new_x_shape)
         return x.permute(0, 2, 1, 3)
 
@@ -337,7 +354,9 @@ class HoneybeeVisualProjectorMultiHeadAttention(nn.Module):
         new_context_layer_shape = context_layer.size()[:-2] + (self.all_head_size,)
         context_layer = context_layer.view(*new_context_layer_shape)
 
-        outputs = (context_layer, attention_probs) if output_attentions else (context_layer,)
+        outputs = (
+            (context_layer, attention_probs) if output_attentions else (context_layer,)
+        )
 
         outputs = outputs + (past_key_value,)
         return outputs
@@ -351,7 +370,9 @@ class HoneybeeVisualProjectorCrossOutput(nn.Module):
         self.norm2 = LayerNormFp32(dim)
         self.mlp = HoneybeeVisualProjectorMLP(config)
 
-    def forward(self, hidden_states: torch.Tensor, input_tensor: torch.Tensor) -> torch.Tensor:
+    def forward(
+        self, hidden_states: torch.Tensor, input_tensor: torch.Tensor
+    ) -> torch.Tensor:
         input_tensor = input_tensor + self.out_proj(hidden_states)
         input_tensor = input_tensor + self.mlp(self.norm2(input_tensor))
         return input_tensor
@@ -383,7 +404,9 @@ class HoneybeeVisualProjectorAttention(nn.Module):
         self.output.dense = prune_linear_layer(self.output.out_proj, index, dim=1)
 
         # Update hyper params and store pruned heads
-        self.attention.num_attention_heads = self.attention.num_attention_heads - len(heads)
+        self.attention.num_attention_heads = self.attention.num_attention_heads - len(
+            heads
+        )
         self.attention.all_head_size = (
             self.attention.attention_head_size * self.attention.num_attention_heads
         )
@@ -400,16 +423,18 @@ class HoneybeeVisualProjectorAttention(nn.Module):
         output_attentions: Optional[bool] = False,
     ) -> Tuple[torch.Tensor]:
         """
-            hidden_states: query embeddings [B, num_queries, dim]
-            encoder_hidden_states: visual features [B, num_visual_features, dim]
-            Note) above two features should be the same dimensions.
+        hidden_states: query embeddings [B, num_queries, dim]
+        encoder_hidden_states: visual features [B, num_visual_features, dim]
+        Note) above two features should be the same dimensions.
         """
         # HACK we apply norm on q and k
         hidden_states = self.norm1(hidden_states)  # [B, n_key, dim]
         encoder_hidden_states = self.normk(encoder_hidden_states)  # [B, n_query, dim]
         # the resampler uses concatenated features [key, query] as query
         encoder_hidden_states = torch.cat([hidden_states, encoder_hidden_states], dim=1)
-        encoder_attention_mask = torch.cat([attention_mask, encoder_attention_mask], dim=-1)
+        encoder_attention_mask = torch.cat(
+            [attention_mask, encoder_attention_mask], dim=-1
+        )
         self_outputs = self.attention(
             hidden_states,
             attention_mask,
@@ -446,7 +471,9 @@ class HoneybeeVisualProjectorLayer(nn.Module):
         output_attentions=False,
     ):
         if encoder_hidden_states is None:
-            raise ValueError("encoder_hidden_states must be given for cross-attention layers")
+            raise ValueError(
+                "encoder_hidden_states must be given for cross-attention layers"
+            )
         cross_attention_outputs = self.crossattention(
             hidden_states,
             attention_mask,
@@ -526,31 +553,40 @@ class HoneybeeVisualProjectorEncoder(nn.Module):
                 all_output_attentions = all_output_attentions + (layer_outputs[1],)
             hidden_states = layer_outputs[0]
 
-        return BaseModelOutput(last_hidden_state=hidden_states, attentions=all_output_attentions)
+        return BaseModelOutput(
+            last_hidden_state=hidden_states, attentions=all_output_attentions
+        )
 
 
 class HoneybeeVisualProjectorModel(HoneybeePreTrainedModel):
-    """ Resampler model performing cross-attention
+    """Resampler model performing cross-attention
     between query_tokens (key, value) and visual features (query)
     """
-    def __init__(
-        self, config: HoneybeeVisualProjectorConfig, num_input_tokens: int
-    ):
+
+    def __init__(self, config: HoneybeeVisualProjectorConfig, num_input_tokens: int):
         super().__init__(config)
         self.config = config
         self.encoder = HoneybeeVisualProjectorEncoder(config)
         # for matching dimensions between projector and vision encoder features
-        self.visual_input_fc = torch.nn.Linear(config.encoder_hidden_size, config.hidden_size)  # readout layer
+        self.visual_input_fc = torch.nn.Linear(
+            config.encoder_hidden_size, config.hidden_size
+        )  # readout layer
         # for matching dimensions between projector and lm features
-        self.visual_output_fc = torch.nn.Linear(config.hidden_size, config.output_hidden_size)  # readout layer
+        self.visual_output_fc = torch.nn.Linear(
+            config.hidden_size, config.output_hidden_size
+        )  # readout layer
 
-        self.query_tokens = nn.Parameter(torch.zeros(1, config.num_query_tokens, config.hidden_size))
+        self.query_tokens = nn.Parameter(
+            torch.zeros(1, config.num_query_tokens, config.hidden_size)
+        )
 
         # think tokens
         self.vit_eos = build_eos_tokens(config, config.output_hidden_size)
 
         # pos emb
-        self.pos_emb = build_pos_embeds(config, num_input_tokens, config.encoder_hidden_size)
+        self.pos_emb = build_pos_embeds(
+            config, num_input_tokens, config.encoder_hidden_size
+        )
 
         self.post_init()
 
@@ -602,7 +638,9 @@ class HoneybeeVisualProjectorModel(HoneybeePreTrainedModel):
         # positions we want to attend and -10000.0 for masked positions.
         # Since we are adding it to the raw scores before the softmax, this is
         # effectively the same as removing these entirely.
-        extended_attention_mask = extended_attention_mask.to(dtype=self.dtype)  # fp16 compatibility
+        extended_attention_mask = extended_attention_mask.to(
+            dtype=self.dtype
+        )  # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
         return extended_attention_mask
 
@@ -637,14 +675,18 @@ class HoneybeeVisualProjectorModel(HoneybeePreTrainedModel):
         query_embeds = self.query_tokens.expand(encoder_hidden_states.shape[0], -1, -1)
 
         output_attentions = (
-            output_attentions if output_attentions is not None else self.config.output_attentions
+            output_attentions
+            if output_attentions is not None
+            else self.config.output_attentions
         )
         output_hidden_states = (
             output_hidden_states
             if output_hidden_states is not None
             else self.config.output_hidden_states
         )
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        return_dict = (
+            return_dict if return_dict is not None else self.config.use_return_dict
+        )
 
         input_shape = query_embeds.size()[:-1]
         device = query_embeds.device
@@ -665,7 +707,9 @@ class HoneybeeVisualProjectorModel(HoneybeePreTrainedModel):
         # we need to make broadcastable to [batch_size, num_heads, seq_length, seq_length]
         if encoder_hidden_states is not None:
             if type(encoder_hidden_states) == list:
-                encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states[0].size()
+                encoder_batch_size, encoder_sequence_length, _ = encoder_hidden_states[
+                    0
+                ].size()
             else:
                 (
                     encoder_batch_size,
@@ -680,9 +724,13 @@ class HoneybeeVisualProjectorModel(HoneybeePreTrainedModel):
                 ]
             elif encoder_attention_mask is None:
                 encoder_attention_mask = torch.ones(encoder_hidden_shape, device=device)
-                encoder_extended_attention_mask = self.invert_attention_mask(encoder_attention_mask)
+                encoder_extended_attention_mask = self.invert_attention_mask(
+                    encoder_attention_mask
+                )
             else:
-                encoder_extended_attention_mask = self.invert_attention_mask(encoder_attention_mask)
+                encoder_extended_attention_mask = self.invert_attention_mask(
+                    encoder_attention_mask
+                )
         else:
             encoder_extended_attention_mask = None
 
@@ -721,7 +769,8 @@ class HoneybeeVisualProjectorModel(HoneybeePreTrainedModel):
         sequence_output = self.visual_output_fc(sequence_output)
         if self.vit_eos is not None:
             sequence_output = torch.cat(
-                [sequence_output, self.vit_eos.repeat(sequence_output.shape[0], 1, 1)], dim=1
+                [sequence_output, self.vit_eos.repeat(sequence_output.shape[0], 1, 1)],
+                dim=1,
             )
 
         return BaseModelOutputWithPooling(
@@ -730,4 +779,3 @@ class HoneybeeVisualProjectorModel(HoneybeePreTrainedModel):
             hidden_states=encoder_outputs.hidden_states,
             attentions=encoder_outputs.attentions,
         )
-
