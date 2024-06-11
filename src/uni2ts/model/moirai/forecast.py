@@ -86,7 +86,7 @@ class MoiraiForecast(L.LightningModule):
         num_samples: int = 100,
     ):
         super().__init__()
-        self.save_hyperparameters()  # PL: save all the hyperparameters passed to init into self.hparams
+        self.save_hyperparameters()
         self.module = MoiraiModule(**module_kwargs)
         self.per_sample_loss_func = SampleNLLLoss()
 
@@ -503,8 +503,6 @@ class MoiraiForecast(L.LightningModule):
             + past_seq_id.max(dim=-1, keepdim=True).values
             + 1
         )
-
-        end = 1
         return past_seq_id, future_seq_id
 
     def _convert(

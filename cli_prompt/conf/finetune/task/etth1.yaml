@@ -1,4 +1,5 @@
 _target_: builtins.dict
+use_specified_task_config: True
 prediction_length: 96
 context_length: 5000
 patch_size: 64  # auto

@@ -52,6 +52,9 @@ from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
 
 from uni2ts.model.moirai.module import MoiraiModule
 from uni2ts.model.llm_moirai.finetune import get_data_description, calculate_lags
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+from uni2ts.model.llm_moirai.resampler import PerceiverResampler, LinearProjector
+from peft import LoraConfig, LoraModel
 
 
 class SampleNLLLoss(_PackedNLLLoss):
@@ -83,15 +86,13 @@ class SampleNLLLoss(_PackedNLLLoss):
 
 
 class LlmMoiraiForecast(L.LightningModule):
-    """
-    Moirai for forecasting. Load the ckpt from fine-tuning or pre-training.
-    """
-
     def __init__(
         self,
-        module_kwargs: dict[str, Any],
+        module_kwargs: dict[str, Any],  # Already provided in checkpoints of Moirai classes
         llm_kwargs: dict[str, Any],
-        task_kwargs: dict[str, Any],
+        proj_kwargs: dict[str, Any],
+        lora_kwargs: dict[str, Any],
+        # task_kwargs: dict[str, Any],  # If not provided, follow MoiraiFinetune's training strategy
         data: str,
         prediction_length: int,
         target_dim: int,                     # Get from meta data of test dataset
@@ -102,16 +103,61 @@ class LlmMoiraiForecast(L.LightningModule):
         num_samples: int = 100,
     ):
         super().__init__()
-        self.save_hyperparameters()  # PL: save all the hyperparameters passed to init into self.hparams
+        self.save_hyperparameters()
         self.module = MoiraiModule(**module_kwargs)
+
+        # Set LLM
         self.d_llm = llm_kwargs['d_llm']
         self.llm_layers = llm_kwargs['llm_layers']
         self.llm_model = self._set_llm_model(llm_kwargs['llm_model'])  # LLM is frozen
         self.llm_tokenizer = self._set_llm_tokenizer(llm_kwargs['llm_model'])
-        if isinstance(self.hparams.patch_size, int):
-            self.projector = nn.Linear(self.d_llm, patch_size)
+        if self.hparams.llm_kwargs['llm_model'] == 'LLAMA3':
+            self.llm_model.resize_token_embeddings(len(self.llm_tokenizer))
+            self.llm_model.config.pad_token_id = self.llm_tokenizer.pad_token_id
+            self.llm_model.embed_tokens = nn.Embedding(self.llm_model.config.vocab_size,
+                                                       self.llm_model.config.hidden_size,
+                                                       padding_idx=self.llm_model.config.pad_token_id)
+
+        # ToDo: Make sure forecast's config is the same as finetune ckpt' config
+        #  Now patch_size cannot be 'auto'
+        # Set params related to the forecasting task.
+        self.patch_size = patch_size
+        self.prediction_length = prediction_length
+        self.context_length = context_length
+
+
+        # Set projector.
+        self.proj_type = proj_kwargs['projector']
+        if self.proj_type == 'Linear':
+            self.projector = LinearProjector(in_features=self.d_llm,
+                                             out_features=self.patch_size,
+                                             dropout=self.hparams.proj_kwargs['dropout'],
+                                             bias=self.hparams.proj_kwargs['bias'])
+
+        elif self.proj_type == 'Resampler':
+            self.projector = nn.Sequential(PerceiverResampler(dim=self.d_llm,
+                                                              depth=3,
+                                                              dim_head=64,
+                                                              heads=8,
+                                                              num_queries=self.hparams.proj_kwargs['num_queries'],
+                                                              max_seq_len=512,
+                                                              ff_mult=2),
+                                           LinearProjector(in_features=self.d_llm,
+                                                           out_features=self.patch_size,
+                                                           dropout=self.hparams.proj_kwargs['dropout'],
+                                                           bias=self.hparams.proj_kwargs['bias'])
+                                           )
+
+        elif self.proj_type == 'Honeybee':
+            pass  # ToDo: D-abstractor
         else:
-            self.projector = nn.ModuleList([nn.Linear(self.d_llm, ps) for ps in self.module.patch_sizes])
+            raise ValueError("Unknown projector type")
+
+        #  Set Lora for Moirai  # ToDO: Revise Finetune here. Not pop 'use_lora'
+        # if lora_kwargs['use_lora']:
+        self.lora_config = LoraConfig(**lora_kwargs)
+        self.module = LoraModel(self.module, self.lora_config, "default")
+
         self.per_sample_loss_func = SampleNLLLoss()
         self.data_description = get_data_description(data)
 
@@ -119,8 +165,20 @@ class LlmMoiraiForecast(L.LightningModule):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
+        if llm_model == 'LLAMA3':
+            self.llama_config = AutoConfig.from_pretrained('meta-llama/Meta-Llama-3-8B')
+            self.llama_config.num_hidden_layers = self.llm_layers
+            self.llama_config.output_attentions = True
+            self.llama_config.output_hidden_states = True
 
-        if llm_model == 'LLAMA':
+            llm_model = AutoModelForCausalLM.from_pretrained(
+                    "meta-llama/Meta-Llama-3-8B",
+                    torch_dtype=torch.bfloat16,
+                    device_map="auto",
+                    config=self.llama_config,
+            )
+
+        if llm_model == 'LLAMA2':
             self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
             self.llama_config.num_hidden_layers = self.llm_layers
             self.llama_config.output_attentions = True
@@ -199,8 +257,10 @@ class LlmMoiraiForecast(L.LightningModule):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
+        if llm_model == 'LLAMA3':
+            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 
-        if llm_model == 'LLAMA':
+        elif llm_model == 'LLAMA2':
             try:
                 tokenizer = LlamaTokenizer.from_pretrained(
                     'huggyllama/llama-7b',
@@ -281,7 +341,6 @@ class LlmMoiraiForecast(L.LightningModule):
             time_series_fields=ts_fields,
             past_time_series_fields=past_ts_fields,
         )
-
         return PyTorchPredictor(
             input_names=self.prediction_input_names,
             prediction_net=self,
@@ -590,7 +649,6 @@ class LlmMoiraiForecast(L.LightningModule):
         if isinstance(self.hparams.patch_size, int):
             prompt_prefix = self.projector(prompt_reprs)
         else:
-            # Todo: Use the specific patch_size for each sample...
             prompt_prefix = self.projector[patch_size](prompt_reprs)
 
         batch_size = prompt_prefix.size(0)
@@ -753,8 +811,6 @@ class LlmMoiraiForecast(L.LightningModule):
             + past_seq_id.max(dim=-1, keepdim=True).values
             + 1
         )
-
-        end = 1
         return past_seq_id, future_seq_id
 
     def _convert(

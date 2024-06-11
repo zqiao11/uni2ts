@@ -63,6 +63,7 @@ from uni2ts.transform import (
 )
 
 from .module import MoiraiModule
+import math
 
 
 class MoiraiFinetune(L.LightningModule):
@@ -501,7 +502,7 @@ class MoiraiFinetune(L.LightningModule):
                     collection_type=dict,
                 )
                 + EvalMaskedPrediction(
-                    mask_length=-prediction_length % patch_size,
+                    mask_length=math.ceil(prediction_length / patch_size),
                     target_field="target",
                     truncate_fields=("variate_id", "time_id", "observed_mask"),
                     optional_truncate_fields=("past_feat_dynamic_real",),

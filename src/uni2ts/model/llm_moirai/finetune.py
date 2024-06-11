@@ -1,6 +1,5 @@
 
-
-import transformers
+from collections import defaultdict
 from transformers import (
     LlamaConfig,
     LlamaModel,
@@ -22,12 +21,17 @@ import torch
 from einops import rearrange
 from jaxtyping import Bool, Float, Int
 from torch import nn
-from uni2ts.loss.packed import PackedDistributionLoss, PackedNLLLoss
 from uni2ts.module.norm import RMSNorm
 from uni2ts.module.position import (
     BinaryAttentionBias,
     LearnedEmbedding,
     LearnedProjection,
+)
+from uni2ts.loss.packed import (
+    PackedDistributionLoss,
+    PackedLoss,
+    PackedNLLLoss,
+    PackedPointLoss,
 )
 from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
@@ -59,6 +63,21 @@ from uni2ts.transform import (
     PadOutRangeTokens
 )
 from einops import repeat
+from transformers import AutoTokenizer, AutoModelForCausalLM, AutoConfig
+from peft import LoraConfig, LoraModel
+from uni2ts.model.llm_moirai.resampler import PerceiverResampler, LinearProjector
+
+
+def print_trainable_parameters(model):
+    trainable_params = 0
+    all_param = 0
+    for _, param in model.named_parameters():
+        all_param += param.numel()
+        if param.requires_grad:
+            trainable_params += param.numel()
+    print(
+        f"trainable params: {trainable_params} || all params: {all_param} || trainable%: {100 * trainable_params / all_param:.2f}"
+    )
 
 
 def get_data_description(data: str):
@@ -109,7 +128,9 @@ class LlmMoiraiFinetune(L.LightningModule):
         self,
         module_kwargs: dict[str, Any],  # Already provided in checkpoints of Moirai classes
         llm_kwargs: dict[str, Any],
-        task_kwargs: dict[str, Any],    # If not provided, follow MoiraiFinetune's training strategy
+        proj_kwargs: dict[str, Any],
+        lora_kwargs: dict[str, Any],
+        task_kwargs: dict[str, Any],  # If not provided, follow MoiraiFinetune's training strategy
         data: str,
         min_patches: int,
         min_mask_ratio: float,
@@ -121,14 +142,13 @@ class LlmMoiraiFinetune(L.LightningModule):
         beta1: float = 0.9,
         beta2: float = 0.98,
         loss_func: PackedDistributionLoss = PackedNLLLoss(),
+        val_metric: Optional[PackedLoss | list[PackedLoss]] = None,
         lr: float = 1e-3,
         weight_decay: float = 1e-2,
         log_on_step: bool = False,
-        moirai_opt_mode: str = 'freeze'
+        moirai_opt_mode: str = 'freeze',
     ):
-        """
 
-        """
         assert (
             num_warmup_steps <= num_training_steps
         ), f"num_warmup_steps ({num_warmup_steps}) should be <= num_training_steps ({num_training_steps})."
@@ -143,18 +163,36 @@ class LlmMoiraiFinetune(L.LightningModule):
         self.d_llm = llm_kwargs['d_llm']
         self.llm_layers = llm_kwargs['llm_layers']
 
-        # Set params related to the forecasting task.
-        self.patch_size = task_kwargs['patch_size']
-        self.prediction_length = task_kwargs['prediction_length']
-        self.context_length = task_kwargs['context_length']
+        # Type of projector
+        self.proj_type = proj_kwargs['projector']
 
         # Load dataset description based on 'data'
         self.data_description = get_data_description(data)
+
+        # Set params related to the forecasting task.
+        if task_kwargs['use_specified_task_config']:
+            self.patch_size = task_kwargs['patch_size']
+            self.prediction_length = task_kwargs['prediction_length']
+            self.context_length = task_kwargs['context_length']
+        else:
+            self.patch_size, self.prediction_length, self.context_length = None, None, None
+
+        # Lora config
+        if lora_kwargs['use_lora']:
+            lora_kwargs.pop('use_lora')
+            self.lora_config = LoraConfig(**lora_kwargs)
 
     def init_after_loading_moirai(self):
         # Initialize the pretrained LLM and tokenizer.
         self.llm_model = self._set_llm_model(self.hparams.llm_kwargs['llm_model'])  # LLM is frozen
         self.llm_tokenizer = self._set_llm_tokenizer(self.hparams.llm_kwargs['llm_model'])
+        # See https://huggingface.co/docs/transformers/main/en/model_doc/llama3
+        if self.hparams.llm_kwargs['llm_model'] == 'LLAMA3':
+            self.llm_model.resize_token_embeddings(len(self.llm_tokenizer))
+            self.llm_model.config.pad_token_id = self.llm_tokenizer.pad_token_id
+            self.llm_model.embed_tokens = nn.Embedding(self.llm_model.config.vocab_size,
+                                                       self.llm_model.config.hidden_size,
+                                                       padding_idx=self.llm_model.config.pad_token_id)
 
         # Todo: By default, Moirai uses multiple patch size for projection. Randomly select patch size for samples.
         #  If finetune with multi patch size, we need multiple Linear layers to project r_txt to TS patch.
@@ -164,10 +202,35 @@ class LlmMoiraiFinetune(L.LightningModule):
         #  For now, we only consider passing specified configs and using 1 Linear layer for simplicity.
 
         # Initialize projector
-        if isinstance(self.patch_size, int):
-            self.projector = nn.Linear(self.d_llm, self.patch_size)
+        if self.proj_type == 'Linear':
+            self.projector = LinearProjector(in_features=self.d_llm,
+                                             out_features=self.patch_size,
+                                             dropout=self.hparams.proj_kwargs['dropout'],
+                                             bias=self.hparams.proj_kwargs['bias'])
+
+        elif self.proj_type == 'Resampler':
+            self.projector = nn.Sequential(PerceiverResampler(dim=self.d_llm,
+                                                              depth=3,
+                                                              dim_head=64,
+                                                              heads=8,
+                                                              num_queries=self.hparams.proj_kwargs['num_queries'],
+                                                              max_seq_len=512,
+                                                              ff_mult=2),
+                                           LinearProjector(in_features=self.d_llm,
+                                                           out_features=self.patch_size,
+                                                           dropout=self.hparams.proj_kwargs['dropout'],
+                                                           bias=self.hparams.proj_kwargs['bias'])
+                                           )
+
+        elif self.proj_type == 'Honeybee':
+            pass  # ToDo: D-abstractor
         else:
-            self.projector = nn.ModuleList([nn.Linear(self.d_llm, ps) for ps in self.module.patch_sizes])
+            raise ValueError("Unknown projector type")
+
+        #  Use Lora for Moirai
+        if self.lora_config is not None:
+            self.module = LoraModel(self.module, self.lora_config, "default")
+            print_trainable_parameters(self.module)
 
     def forward(
             self,
@@ -177,73 +240,66 @@ class LlmMoiraiFinetune(L.LightningModule):
             time_id: Int[torch.Tensor, "*batch seq_len"],
             variate_id: Int[torch.Tensor, "*batch seq_len"],
             prediction_mask: Bool[torch.Tensor, "*batch seq_len"],
-            patch_size: Int[torch.Tensor, "*batch seq_len"], # Can different patches in a sample have differnet patch_sizes?
-            num_samples: Optional[int] = None,
-    ) -> Float[torch.Tensor, "*batch sample seq_len max_patch"]:
+            patch_size: Int[torch.Tensor, "*batch seq_len"],
+    ):
 
-        # ToDo: Now it is only for uni-variate. Not flatten multi-variate.
+        # ToDo: ======== Now it is only for uni-variate. Not flatten multi-variate. =======
 
-        # For each TS in the batch, generate a prompt
         prompt = self._get_sample_prompt(target, observed_mask, prediction_mask)
 
         #  Get LLM reprs of prompt.
         #  ToDo: Need to process prompt_len. max_length=2048 is not compatible with Moirai's max_length.
         prompt = self.llm_tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048)
         prompt = prompt.to(self.llm_model.device)
-        prompt_reprs = self.llm_model(input_ids=prompt.input_ids,
-                                      attention_mask=prompt.attention_mask).last_hidden_state  # (bs, num_prompt_patches, d_llm)
+        prompt_reprs = self.llm_model(input_ids=prompt.input_ids, #  (bs, num_prompt_patches, d_llm)
+                                      attention_mask=prompt.attention_mask).last_hidden_state
 
-        # ToDo: Add a Q-former to reduce prompt length to a fixed length!
+        # ToDo: Add a Q-former/Some module to reduce prompt length to a fixed length!
         #  Samples from different batches have different prompt length.
+        #  num_prompt_patches is larger than num_ts_patches
 
-        # Use projector to map r_p to e_p. (bs, num_prompt_patches, patch_size)
+        # Use projector to map r_t to p_t. Prompt tokens are in the same space of TS patches.
         if isinstance(self.patch_size, int):
-            prompt_prefix = self.projector(prompt_reprs)
+            prompt_tokens = self.projector(prompt_reprs)  # (bs, num_prompt_patches, patch_size)
         else:
             # Todo: Use the specific patch_size for each sample...
-            prompt_prefix = self.projector[patch_size](prompt_reprs)
+            prompt_tokens = self.projector[patch_size](prompt_reprs)
 
-        batch_size = prompt_prefix.size(0)
-        num_prompt_tokens = prompt_prefix.size(1)
 
-        # Prepend prompt, modify the masks and ids.
+        # ToDo: Make prompt tokens have the same loc and std of context ts
+        prompt_tokens = self.rescale(prompt_tokens, target, observed_mask, prediction_mask, sample_id, variate_id)
 
-        #  Pad last dim of prompt_prefix to max_patch_size.
-        padded_prompt_prefix = torch.zeros((prompt_prefix.size(0), prompt_prefix.size(1), max(self.module.patch_sizes)),
-                                           dtype=prompt_prefix.dtype,
+
+        batch_size = prompt_tokens.size(0)
+        num_prompt_tokens = prompt_tokens.size(1)
+
+        # Modify the masks and ids before prepending:
+        # Pad last dim of prompt_tokens to max_patch_size.
+        padded_prompt_prefix = torch.zeros((prompt_tokens.size(0), prompt_tokens.size(1), max(self.module.patch_sizes)),
+                                           dtype=prompt_tokens.dtype,
                                            device=target.device)
-        padded_prompt_prefix[:, :, :prompt_prefix.size(2)] = prompt_prefix  # (bs, num_prompt_patches, max_patch_size)
+        padded_prompt_prefix[:, :, :prompt_tokens.size(2)] = prompt_tokens  # (bs, num_prompt_patches, max_patch_size)
 
-        #  First patch of each sample starts with non-observed values due to padding.
-        #  Can we directly prepend prompt to target? Then that patch will be [True, True, False, ..., True, ...]
-        #  Time Series is cut into separated segments by the mask... Not consecutive.
-        #  Can! Not necessary to handle it. It is common for patching.
-        prompt_observed_mask = torch.zeros((prompt_prefix.size(0), prompt_prefix.size(1), max(self.module.patch_sizes)),
+        # Create observed_mask for prompt tokens.
+        prompt_observed_mask = torch.zeros((prompt_tokens.size(0), prompt_tokens.size(1), max(self.module.patch_sizes)),
                                            dtype=observed_mask.dtype,
                                            device=observed_mask.device)
-        prompt_observed_mask[:, :, :prompt_prefix.size(2)] = True
+        prompt_observed_mask[:, :, :prompt_tokens.size(2)] = True
 
-        # og_target = target
-        # og_observed_mask = observed_mask
-        # og_sample_id = sample_id
-        # og_time_id = time_id
-        # og_variate_id = variate_id
-        # og_prediction_mask = prediction_mask
-        # og_patch_size = patch_size
-
+        # Prepend prompt tokens to TS patches.
         target = torch.cat([padded_prompt_prefix, target], dim=1)
         observed_mask = torch.cat([prompt_observed_mask, observed_mask], dim=1)
 
-        # Each item is an individual sample and none of patches is completely padded, so all sample_ids are ones.
+        # Create sample_id for prompt and prepend. Not using packing, so all sample_id are 1.
         sample_id = torch.cat(
             [torch.ones((batch_size, num_prompt_tokens), dtype=sample_id.dtype, device=sample_id.device), sample_id],
             dim=1
         )
 
         # Todo: For uni-channel are as below. How to deal with flatten multi-channel? prompt as a new variate?
-        # Treat prompt patches as TS patches, so we need to add original time_id by num_prompt_patches.
-        # Then concat with [0,..., num_prompt_patches].
-        # No Sequence packing, so no worry about the ending patches are padded and with time id of zeros.
+        # Treat prompt tokens as TS patches, so we need to add original time_id by num_prompt_tokens.
+        # Then prepend it with prompt time_id: [0,..., num_prompt_tokens].
+        # No sequence packing, so no worry about the ending patches are padded and with time id of zeros.
         time_id = torch.cat(
             [torch.arange(0, num_prompt_tokens, dtype=time_id.dtype, device=time_id.device).repeat(time_id.size(0), 1),
              time_id + num_prompt_tokens],
@@ -251,7 +307,7 @@ class LlmMoiraiFinetune(L.LightningModule):
         )
 
         # ToDo: For uni-channel, duplicate. For flatten multi-channel, create a new variate.
-        #  Cannot be the same as the ones in exsisting variates. Need to in the max_dim range.
+        #  Cannot be the same as the ones in existing variates. Need to be in the max_dim range.
         variate_id = repeat(
             variate_id[:, 0],
             'batch -> batch seq_len',
@@ -270,130 +326,45 @@ class LlmMoiraiFinetune(L.LightningModule):
             seq_len=patch_size.shape[1] + num_prompt_tokens
         )
 
-        distr = self.module(
-            target,
-            observed_mask,
-            sample_id,
-            time_id,
-            variate_id,
-            prediction_mask,
-            patch_size,
-        )
-        preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
-        return rearrange(preds, "n b ... -> b n ...")
-
-    def loss(
-        self,
-        target: Float[torch.Tensor, "*batch seq_len max_patch"],
-        observed_mask: Bool[torch.Tensor, "*batch seq_len max_patch"],
-        sample_id: Int[torch.Tensor, "*batch seq_len"],
-        time_id: Int[torch.Tensor, "*batch seq_len"],
-        variate_id: Int[torch.Tensor, "*batch seq_len"],
-        prediction_mask: Bool[torch.Tensor, "*batch seq_len"],
-        patch_size: Int[torch.Tensor, "*batch seq_len"],
-    ) -> Float[torch.Tensor, ""]:
-
-        # For each TS in the batch, generate a prompt
-        prompt = self._get_sample_prompt(target, observed_mask, prediction_mask)
-
-        #  Get LLM reprs of prompt.
-        #  ToDo: Need to process prompt_len. max_length=2048 is not compatible with Moirai's max_length.
-        prompt = self.llm_tokenizer(prompt, return_tensors="pt", padding=True, truncation=True, max_length=2048)
-        prompt = prompt.to(self.llm_model.device)
-        prompt_reprs = self.llm_model(input_ids=prompt.input_ids,
-                                      attention_mask=prompt.attention_mask).last_hidden_state   # (bs, num_prompt_patches, d_llm)
-
-        # ToDo: Add a Q-former to reduce prompt length to a fixed length!
-        #  Samples from different batches have different prompt length.
-
-        # Use projector to map r_p to e_p. (bs, num_prompt_patches, patch_size)
-        if isinstance(self.patch_size, int):
-            prompt_prefix = self.projector(prompt_reprs)
-        else:
-            # Todo: Use the specific patch_size for each sample...
-            prompt_prefix = self.projector[patch_size](prompt_reprs)
-
-        batch_size = prompt_prefix.size(0)
-        num_prompt_tokens = prompt_prefix.size(1)
-
-        # Prepend prompt, modify the masks and ids.
-
-        #  Pad last dim of prompt_prefix to max_patch_size.
-        padded_prompt_prefix = torch.zeros((prompt_prefix.size(0), prompt_prefix.size(1), max(self.module.patch_sizes)),
-                                           dtype=prompt_prefix.dtype,
-                                           device=target.device)
-        padded_prompt_prefix[:, :, :prompt_prefix.size(2)] = prompt_prefix  # (bs, num_prompt_patches, max_patch_size)
-
-        #  First patch of each sample starts with non-observed values due to padding.
-        #  Can we directly prepend prompt to target? Then that patch will be [True, True, False, ..., True, ...]
-        #  Time Series is cut into separated segments by the mask... Not consecutive.
-        #  Can! Not necessary to handle it. It is common for patching.
-        prompt_observed_mask = torch.zeros((prompt_prefix.size(0), prompt_prefix.size(1), max(self.module.patch_sizes)),
-                                           dtype=observed_mask.dtype,
-                                           device=observed_mask.device)
-        prompt_observed_mask[:, :, :prompt_prefix.size(2)] = True
-
-        target = torch.cat([padded_prompt_prefix, target], dim=1)
-        observed_mask = torch.cat([prompt_observed_mask, observed_mask], dim=1)
-
-        # Each item is an individual sample and none of patches is completely padded, so all sample_ids are ones.
-        sample_id = torch.cat(
-            [torch.ones((batch_size, num_prompt_tokens), dtype=sample_id.dtype, device=sample_id.device), sample_id],
-            dim=1
-        )
-
-        # Todo: For uni-channel are as below. How to deal with flatten multi-channel? prompt as a new variate?
-        # Treat prompt patches as TS patches, so we need to add original time_id by num_prompt_patches.
-        # Then concat with [0,..., num_prompt_patches].
-        # No Sequence packing, so no worry about the ending patches are padded and with time id of zeros.
-        time_id = torch.cat(
-            [torch.arange(0, num_prompt_tokens, dtype=time_id.dtype, device=time_id.device).repeat(time_id.size(0), 1),
-             time_id + num_prompt_tokens],
-            dim=1
-        )
-
-        # ToDo: For uni-channel, duplicate. For flatten multi-channel, create a new variate.
-        #  Cannot be the same as the ones in exsisting variates. Need to in the max_dim range.
-        variate_id = repeat(
-            variate_id[:, 0],
-            'batch -> batch seq_len',
-            seq_len=variate_id.shape[1]+num_prompt_tokens
-        )
-
-        prediction_mask = torch.cat(
-            [torch.zeros((batch_size, num_prompt_tokens), dtype=prediction_mask.dtype, device=prediction_mask.device), prediction_mask],
-            dim=1
-        )
-
-        patch_size = repeat(
-            patch_size[:, 0],
-            'batch -> batch seq_len',
-            seq_len=patch_size.shape[1]+num_prompt_tokens
-        )
+        prompt_batch = {"target": target,
+                        "prediction_mask": prediction_mask,
+                        "observed_mask": observed_mask,
+                        "sample_id": sample_id,
+                        "time_id": time_id,
+                        "variate_id": variate_id,
+                        "patch_size": patch_size}
 
         distr = self.module(
-            target,
-            observed_mask,
-            sample_id,
-            time_id,
-            variate_id,
-            prediction_mask,
-            patch_size,
-        )
-        loss = self.hparams.loss_func(
-            pred=distr,
             target=target,
-            prediction_mask=prediction_mask,
             observed_mask=observed_mask,
             sample_id=sample_id,
+            time_id=time_id,
             variate_id=variate_id,
+            prediction_mask=prediction_mask,
+            patch_size=patch_size,
         )
-        return loss
+
+        loss = self.hparams.loss_func(
+                pred=distr,
+                target=target,
+                prediction_mask=prediction_mask,
+                observed_mask=observed_mask,
+                sample_id=sample_id,
+                variate_id=variate_id,
+            )
+
+        return distr, loss, prompt_batch
+
+    #     preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
+    #     return rearrange(preds, "n b ... -> b n ...")
 
     def training_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
         self.llm_model.eval()
 
-        loss = self.loss(**batch)
+        distr, loss, prompt_batch = self(
+            **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
+        )
+
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
@@ -411,13 +382,16 @@ class LlmMoiraiFinetune(L.LightningModule):
         return loss
 
     def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
-        loss = self.loss(**batch)
+        distr, val_loss, prompt_batch = self(
+            **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
+        )
+
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
         self.log(
-            "val_loss",
-            loss,
+            f"val/{self.hparams.loss_func.__class__.__name__}",
+            val_loss,
             on_step=self.hparams.log_on_step,
             on_epoch=True,
             prog_bar=True,
@@ -427,7 +401,48 @@ class LlmMoiraiFinetune(L.LightningModule):
             rank_zero_only=True,
         )
 
-        return loss
+        if self.hparams.val_metric is not None:
+            val_metrics = (
+                self.hparams.val_metric
+                if isinstance(self.hparams.val_metric, list)
+                else [self.hparams.val_metric]
+            )
+            for metric_func in val_metrics:
+                if isinstance(metric_func, PackedPointLoss):
+                    pred = distr.sample(torch.Size((self.hparams.num_samples,)))
+                    pred = torch.median(pred, dim=0).values
+                elif isinstance(metric_func, PackedDistributionLoss):
+                    pred = distr
+                else:
+                    raise ValueError(f"Unsupported loss function: {metric_func}")
+
+                metric = metric_func(
+                    pred=pred,
+                    **{
+                        field: prompt_batch[field]
+                        for field in [
+                            "target",
+                            "prediction_mask",
+                            "observed_mask",
+                            "sample_id",
+                            "variate_id",
+                        ]
+                    },
+                )
+
+                self.log(
+                    f"val/{metric_func.__class__.__name__}",
+                    metric,
+                    on_step=self.hparams.log_on_step,
+                    on_epoch=True,
+                    prog_bar=True,
+                    logger=True,
+                    sync_dist=True,
+                    batch_size=batch_size,
+                    rank_zero_only=True,
+                )
+
+        return val_loss
 
     def configure_optimizers(self) -> dict:
         """
@@ -437,7 +452,7 @@ class LlmMoiraiFinetune(L.LightningModule):
             - Handle params in Moirai based on  moirai_opt_mode
         Follow the same optimizer setup as MoiraiFinetune.
         """
-        # Todo: select trainable params
+        # ToDo: Partial finetuning is not a good practice? Use Lora.
         # Set all params except the ones in projector to Non-trainable
         for pn, p in self.named_parameters():
             if not pn.startswith('projector'):
@@ -544,12 +559,59 @@ class LlmMoiraiFinetune(L.LightningModule):
             },
         }
 
+    def rescale(self, prompt_tokens, target, observed_mask, prediction_mask, sample_id, variate_id):
+        with torch.no_grad():
+            loc_, scale_ = self.module.scaler(
+                target,
+                observed_mask * ~prediction_mask.unsqueeze(-1),  # Observed and not in prediction range
+                sample_id,
+                variate_id,
+            )
+            loc, scale = loc_.mean(dim=1, keepdim=False), scale_.mean(dim=1, keepdim=False)
+        # (bs, n_promt, ps)
+        # Example shapes
+        bs, num_patch, patch_size = prompt_tokens.shape
+        flattened_size = num_patch * patch_size
+
+        # Step 1: Flatten the prompt_tokens tensor
+        flattened_tokens = prompt_tokens.view(bs, flattened_size)
+
+        # Step 2: Calculate the current mean and standard deviation
+        current_mean = flattened_tokens.mean(dim=1, keepdim=True)
+        current_std = flattened_tokens.std(dim=1, keepdim=True)
+
+        # Step 3: Normalize the flattened tensor to have a mean of 0 and std of 1
+        normalized_tokens = (flattened_tokens - current_mean) / current_std
+
+        # Step 4: Scale and shift the normalized tensor to match the desired loc and scale
+        processed_tokens = normalized_tokens * scale + loc
+
+        # Reshape back to the original shape if needed
+        processed_tokens = processed_tokens.view(bs, num_patch, patch_size)
+
+        return processed_tokens
+
+
+
+
     def _set_llm_model(self, llm_model):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
+        if llm_model == 'LLAMA3':
+            self.llama_config = AutoConfig.from_pretrained('meta-llama/Meta-Llama-3-8B')
+            self.llama_config.num_hidden_layers = self.llm_layers
+            self.llama_config.output_attentions = True
+            self.llama_config.output_hidden_states = True
 
-        if llm_model == 'LLAMA':
+            llm_model = AutoModelForCausalLM.from_pretrained(
+                    "meta-llama/Meta-Llama-3-8B",
+                    torch_dtype=torch.bfloat16,
+                    device_map="auto",
+                    config=self.llama_config,
+            )
+
+        if llm_model == 'LLAMA2':
             self.llama_config = LlamaConfig.from_pretrained('huggyllama/llama-7b')
             self.llama_config.num_hidden_layers = self.llm_layers
             self.llama_config.output_attentions = True
@@ -628,8 +690,10 @@ class LlmMoiraiFinetune(L.LightningModule):
         """
         Adapt from https://github.com/KimMeen/Time-LLM/blob/main/models/TimeLLM.py
         """
+        if llm_model == 'LLAMA3':
+            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Meta-Llama-3-8B")
 
-        if llm_model == 'LLAMA':
+        elif llm_model == 'LLAMA2':
             try:
                 tokenizer = LlamaTokenizer.from_pretrained(
                     'huggyllama/llama-7b',
@@ -729,7 +793,6 @@ class LlmMoiraiFinetune(L.LightningModule):
 
         return prompt
 
-
     @property
     def num_time_patches(self):
         return math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
@@ -738,328 +801,275 @@ class LlmMoiraiFinetune(L.LightningModule):
     def is_specified_all_config(self):
         return self.context_length and self.prediction_length and self.patch_size
 
-    def create_train_transform(self) -> Transformation:
+    @property
+    def train_transform_map(self,) -> dict[str | type, Callable[..., Transformation]]:
         """
         Transformation per sample for train dataset.
-        Called in cli/finetune.py to process the training dataset.
+        Called in cli/train.py to process the training dataset.
         If 'wide', each data_entry is the entire record of a channel.
         If 'wide_multivariate', each data_entry is the entire records of all the channels.
+        Initially, each 'target' is [(L, ), ..., (L, )], as _pa_column_to_numpy of HuggingFaceDatasetIndexer.
         """
-
-        return (
-            # Initial 'target' is [(L, ), ..., (L, )], as _pa_column_to_numpy of HuggingFaceDatasetIndexer.
-            # Only 1 series in 'target' if build data in 'wide'. Have multi series if build in 'wide_multivariate'
-            # Remove SampleDimension if build in 'wide_multivariate'.  # ToDo: Why?
-            SampleDimension(
-                max_dim=self.hparams.max_dim,
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-            ) +
-
-            # add a new field of "patch_size" to data dict.
-            # randomly choose from range based on frequency
-            GetPatchSize(
-                min_time_patches=self.hparams.min_patches,
-                target_field="target",
-                patch_sizes=self.module.patch_sizes,
-                patch_size_constraints=FixedPatchSizeConstraints(self.patch_size) if self.patch_size else DefaultPatchSizeConstraints(),
-                offset=True,
+        def default_train_transform():
+            return (
+                GetPatchSize(
+                    min_time_patches=self.hparams.min_patches,
+                    target_field="target",
+                    patch_sizes=self.module.patch_sizes,
+                    patch_size_constraints=FixedPatchSizeConstraints(self.patch_size) if self.patch_size else DefaultPatchSizeConstraints(),
+                    offset=True,
+                )
+                + SpecifiedPatchCrop(
+                    min_time_patches=self.hparams.min_patches if not self.is_specified_all_config else self.num_time_patches,
+                    max_time_patches=None if not self.is_specified_all_config else self.num_time_patches,
+                    max_patches=self.module.max_seq_len,
+                    will_flatten=True,
+                    offset=True,
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                + PackFields(
+                    output_field="target",
+                    fields=("target",),
+                )
+                + PackFields(
+                    output_field="past_feat_dynamic_real",
+                    fields=tuple(),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                # Set the first tokens in context (1st patch) and last tokens in prediction (the last patch) as Nan.
+                + PadOutRangeTokens(
+                    prediction_pad=-self.prediction_length % self.patch_size,
+                    context_pad=-self.context_length % self.patch_size,
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                # Add a new field 'observed_mask'. Observed or missing: nan are False.
+                + AddObservedMask(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    observed_mask_field="observed_mask",
+                    collection_type=dict,
+                )
+                + ImputeTimeSeries(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    imputation_method=DummyValueImputation(value=0.0),
+                )
+                # Patchify TS record into patches, based on its patch_size field.
+                # No matter used patch_size, pad all the patches to max_patch_size.
+                # Shape of patchified fields of a sample: (1, n_patch, max_patch_size)
+                + Patchify(
+                    max_patch_size=max(self.module.patch_sizes),
+                    fields=("target", "observed_mask"),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                + AddVariateIndex(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    variate_id_field="variate_id",
+                    expected_ndim=3,
+                    max_dim=self.hparams.max_dim,
+                    randomize=True,
+                    collection_type=dict,
+                )
+                + AddTimeIndex(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    time_id_field="time_id",
+                    expected_ndim=3,
+                    collection_type=dict,
+                )
+                + AddSampleIndex(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    sample_id_field="sample_id",
+                    expected_ndim=3,
+                    collection_type=dict,
+                )
+                # Add a new field "prediction_mask". Random mask patches in the end for prediction.
+                # Mask ratio is uniformly sampled from [min_mask_ratio, max_mask_ratio]
+                # For truncate_fields, truncate the part corresponding to prediction patches.
+                # If no specific prediction length, different samples have different prediction masks?
+                + (MaskedPrediction(
+                    min_mask_ratio=self.hparams.min_mask_ratio,
+                    max_mask_ratio=self.hparams.max_mask_ratio,
+                    target_field="target",
+                    truncate_fields=("variate_id", "time_id", "sample_id", "observed_mask"),
+                    optional_truncate_fields=("past_feat_dynamic_real",),
+                    prediction_mask_field="prediction_mask",
+                    expected_ndim=3,
+                ) if self.prediction_length is None else EvalMaskedPrediction(
+                    mask_length=math.ceil(self.prediction_length / self.patch_size),
+                    target_field="target",
+                    truncate_fields=("variate_id", "time_id", "sample_id", "observed_mask"),
+                    optional_truncate_fields=("past_feat_dynamic_real",),
+                    prediction_mask_field="prediction_mask",
+                    expected_ndim=3,
+                ))
+                # Extend prediction_mask for "past_feat_dynamic_real" (If it exists)
+                # set another prediction mask with all False for it in field "prediction_mask".
+                # So there will be 2 items in field "prediction_mask".
+                + ExtendMask(
+                    fields=tuple(),
+                    optional_fields=("past_feat_dynamic_real",),
+                    mask_field="prediction_mask",
+                    expected_ndim=3,
+                )
+                # Turn item in field into nparray. Flat along time dimension then pack.
+                + FlatPackCollection(
+                    field="variate_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="time_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="sample_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="prediction_mask",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="observed_mask",
+                    feat=True,
+                )
+                + FlatPackFields(
+                    output_field="target",
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    feat=True,
+                )
+                + SequencifyField(field="patch_size", target_field="target")
+                + SelectFields(fields=list(self.seq_fields))
             )
 
-            # Crop fields in a data_entry in the temporal dimension based on a patch_size.
-            # Sequences in fields will be cropped into a size of random multiple of patch sizes.
-            # Crop size (num_patches) is randomly sampled from [min_time_patches, max_time_patches].
-            # Start point of cropping is randomly selected. So each sample has a different num_patches.
+        return defaultdict(lambda: default_train_transform)
 
-            + SpecifiedPatchCrop(
-                min_time_patches=self.hparams.min_patches if not self.is_specified_all_config else self.num_time_patches,
-                max_time_patches=None if not self.is_specified_all_config else self.num_time_patches,
-                max_patches=self.module.max_seq_len,
-                will_flatten=True,
-                offset=True,
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-            + PackFields(
-                output_field="target",
-                fields=("target",),
-            )
-            + PackFields(
-                output_field="past_feat_dynamic_real",
-                fields=tuple(),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-
-            # Set the first tokens in context (1st patch) and last tokens in prediction (the last patch) as Nan.
-            + PadOutRangeTokens(
-                prediction_pad=-self.prediction_length % self.patch_size,
-                context_pad=-self.context_length % self.patch_size,
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-
-            # Add a new field 'observed_mask'. Observed or missing: nan are False.
-            + AddObservedMask(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                observed_mask_field="observed_mask",
-                collection_type=dict,
-            )
-            # Impute the nan values.
-            + ImputeTimeSeries(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                imputation_method=DummyValueImputation(value=0.0),
-            )
-            # Patchify TS record into patches, based on its patch_size field.
-            # No matter used patch_size, pad all the patches to max_patch_size.
-            # Shape of patchified fields of a sample: (1, n_patch, max_patch_size)
-            + Patchify(
-                max_patch_size=max(self.module.patch_sizes),
-                fields=("target", "observed_mask"),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-            # Add a new field "variate_id".
-            + AddVariateIndex(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                variate_id_field="variate_id",
-                expected_ndim=3,
-                max_dim=self.hparams.max_dim,
-                randomize=True,
-                collection_type=dict,
-            )
-            # Add a new field "time_id".
-            + AddTimeIndex(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                time_id_field="time_id",
-                expected_ndim=3,
-                collection_type=dict,
-            )
-
-            + AddSampleIndex(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                sample_id_field="sample_id",
-                expected_ndim=3,
-                collection_type=dict,
-            )
-
-            # Add a new field "prediction_mask". Random mask patches in the end for prediction.
-            # Mask ratio is uniformly sampled from [min_mask_ratio, max_mask_ratio]
-            # For truncate_fields, truncate the part corresponding to prediction patches.
-            # If no specific prediction length, different samples have different prediction masks?
-            + (MaskedPrediction(
-                min_mask_ratio=self.hparams.min_mask_ratio,
-                max_mask_ratio=self.hparams.max_mask_ratio,
-                target_field="target",
-                truncate_fields=("variate_id", "time_id", "sample_id", "observed_mask"),
-                optional_truncate_fields=("past_feat_dynamic_real",),
-                prediction_mask_field="prediction_mask",
-                expected_ndim=3,
-            ) if self.prediction_length is None else EvalMaskedPrediction(
-                                                        mask_length=math.ceil(self.prediction_length / self.patch_size),
-                                                        target_field="target",
-                                                        truncate_fields=("variate_id", "time_id", "sample_id", "observed_mask"),
-                                                        optional_truncate_fields=("past_feat_dynamic_real",),
-                                                        prediction_mask_field="prediction_mask",
-                                                        expected_ndim=3,
-                                                        ))
-
-            # Extend prediction_mask for "past_feat_dynamic_real" (If it exists)
-            # set another prediction mask with all False for it in field "prediction_mask".
-            # So there will be 2 items in field "prediction_mask".
-            + ExtendMask(
-                fields=tuple(),
-                optional_fields=("past_feat_dynamic_real",),
-                mask_field="prediction_mask",
-                expected_ndim=3,
-            )
-
-            # Turn item in field into nparray. Flat along time dimension then pack.
-            + FlatPackCollection(
-                field="variate_id",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="time_id",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="sample_id",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="prediction_mask",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="observed_mask",
-                feat=True,
-            )
-            + FlatPackFields(
-                output_field="target",
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                feat=True,
-            )
-            + SequencifyField(field="patch_size", target_field="target")
-            + SelectFields(fields=list(self.seq_fields))
-        )
-
-    def create_val_transform(
-            self,
-            offset: int,  # Offset to val split. After offset is used.
-            distance: int,  # distance bt prediction windows, equal to prediction_length
+    @property
+    def val_transform_map(self,) -> dict[str | type, Callable[..., Transformation]]:
+        def default_val_transform(
+            offset: int,               # Offset to val split. Range after offset is used.
+            distance: int,             # distance bt prediction windows, equal to prediction_length
             prediction_length: int,
             context_length: int,
             patch_size: int,
-    ) -> Transformation:
-
-        """
-        Transformation per sample for val dataset.
-        These args are from the config yaml of finetune's val dataset.
-        By default, each data_entry is the entire record of a channel.
-        Be called when preparing a batch of data (__get_item__)
-        """
-        return (
-            # Initial 'target' is [(L, ), ..., (L, )], as _pa_column_to_numpy of HuggingFaceDatasetIndexer.
-            # Only 1 series in 'target' if build data in 'wide'. Have multi series if build in 'wide_multivariate'
-            # Add a new field of "patch_size" to data dict
-            # randomly choose from range based on frequency
-            GetPatchSize(
-                min_time_patches=2,
-                target_field="target",
-                patch_sizes=self.module.patch_sizes,
-                patch_size_constraints=FixedPatchSizeConstraints(patch_size),  # specify patch size
-                offset=True,
+        ):
+            return (
+                GetPatchSize(
+                    min_time_patches=2,
+                    target_field="target",
+                    patch_sizes=self.module.patch_sizes,
+                    patch_size_constraints=FixedPatchSizeConstraints(patch_size),
+                    offset=True,
+                )
+                + EvalCrop(
+                    offset,
+                    distance,
+                    prediction_length,
+                    context_length,
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                + PackFields(
+                    output_field="target",
+                    fields=("target",),
+                )
+                + PackFields(
+                    output_field="past_feat_dynamic_real",
+                    fields=tuple(),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                + EvalPad(
+                    prediction_pad=-prediction_length % patch_size,
+                    context_pad=-context_length % patch_size,
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                + AddObservedMask(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    observed_mask_field="observed_mask",
+                    collection_type=dict,
+                )
+                + ImputeTimeSeries(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    imputation_method=DummyValueImputation(value=0.0),
+                )
+                + Patchify(
+                    max_patch_size=max(self.module.patch_sizes),
+                    fields=("target", "observed_mask"),
+                    optional_fields=("past_feat_dynamic_real",),
+                )
+                + AddVariateIndex(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    variate_id_field="variate_id",
+                    expected_ndim=3,
+                    max_dim=self.hparams.max_dim,
+                    randomize=True,
+                    collection_type=dict,
+                )
+                + AddTimeIndex(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    time_id_field="time_id",
+                    expected_ndim=3,
+                    collection_type=dict,
+                )
+                + AddSampleIndex(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    sample_id_field="sample_id",
+                    expected_ndim=3,
+                    collection_type=dict,
+                )
+                + EvalMaskedPrediction(
+                    mask_length=math.ceil(prediction_length / patch_size),
+                    target_field="target",
+                    truncate_fields=("variate_id", "time_id", "observed_mask"),
+                    optional_truncate_fields=("past_feat_dynamic_real",),
+                    prediction_mask_field="prediction_mask",
+                    expected_ndim=3,
+                )
+                + ExtendMask(
+                    fields=tuple(),
+                    optional_fields=("past_feat_dynamic_real",),
+                    mask_field="prediction_mask",
+                    expected_ndim=3,
+                )
+                + FlatPackCollection(
+                    field="variate_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="time_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="sample_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="prediction_mask",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="observed_mask",
+                    feat=True,
+                )
+                + FlatPackFields(
+                    output_field="target",
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
+                    feat=True,
+                )
+                + SequencifyField(field="patch_size", target_field="target")
+                + SelectFields(fields=list(self.seq_fields))
             )
 
-            # For each sample, crop the [prediction_length context_length] region of sequence
-            # The region is computed based on its 'window' (window id)
-            + EvalCrop(
-                offset,
-                distance,
-                prediction_length,
-                context_length,
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-
-            # Turn variables in fields as nparray. Then pack the fields.
-            # Seems make no difference for wide data if only 'fields' only get 1 field
-            # Then 'target' is nparray:  (1, *). This 1 is based on _pa_column_to_numpy of HuggingFaceDatasetIndexer?
-            + PackFields(
-                output_field="target",
-                fields=("target",),
-            )
-            + PackFields(
-                output_field="past_feat_dynamic_real",
-                fields=tuple(),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-
-            # Pad prediction and context along the time dimension so that can get a multiple of patches
-            # Padded values are Nan.
-            # Therefore, mostly the starting values in the 1st patch are padded.
-            + EvalPad(
-                prediction_pad=-prediction_length % patch_size,
-                context_pad=-context_length % patch_size,
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-            + AddObservedMask(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                observed_mask_field="observed_mask",
-                collection_type=dict,
-            )
-            + ImputeTimeSeries(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                imputation_method=DummyValueImputation(value=0.0),
-            )
-
-            # Patchify TS record into patches.
-            # No matter used patch_size, pad all the patches to max_patch_size!
-            # Shape of patchified fields: (1, n_patch, max_patch_size)
-            # Therefore, mostly the ending values in the 1st patch are padded. (to max_patch_size)
-            + Patchify(
-                max_patch_size=max(self.module.patch_sizes),
-                fields=("target", "observed_mask"),
-                optional_fields=("past_feat_dynamic_real",),
-            )
-
-            # Add a random number to each variate. Randomize for permutation equivariance/invariance.
-            + AddVariateIndex(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                variate_id_field="variate_id",
-                expected_ndim=3,
-                max_dim=self.hparams.max_dim,
-                randomize=True,
-                collection_type=dict,
-            )
-            # Add Time_id for each patch. These ids are in order.
-            + AddTimeIndex(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                time_id_field="time_id",
-                expected_ndim=3,
-                collection_type=dict,
-            )
-
-            + AddSampleIndex(
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                sample_id_field="sample_id",
-                expected_ndim=3,
-                collection_type=dict,
-            )
-
-            + EvalMaskedPrediction(
-                mask_length=math.ceil(self.prediction_length / self.patch_size),
-                target_field="target",
-                truncate_fields=("variate_id", "time_id", "sample_id", "observed_mask"),
-                optional_truncate_fields=("past_feat_dynamic_real",),
-                prediction_mask_field="prediction_mask",
-                expected_ndim=3,
-            )
-            + ExtendMask(
-                fields=tuple(),
-                optional_fields=("past_feat_dynamic_real",),
-                mask_field="prediction_mask",
-                expected_ndim=3,
-            )
-            + FlatPackCollection(
-                field="variate_id",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="time_id",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="sample_id",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="prediction_mask",
-                feat=False,
-            )
-            + FlatPackCollection(
-                field="observed_mask",
-                feat=True,
-            )
-            + FlatPackFields(
-                output_field="target",
-                fields=("target",),
-                optional_fields=("past_feat_dynamic_real",),
-                feat=True,
-            )
-            # Transform patch_size from int to a sequence (num_patches, patch_size).
-            # For each sample, patch_size is the same.
-            + SequencifyField(field="patch_size", target_field="target")
-            + SelectFields(fields=list(self.seq_fields))
-        )
+        return defaultdict(lambda: default_val_transform)

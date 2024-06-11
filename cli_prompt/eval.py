@@ -23,18 +23,14 @@ from torch.utils.tensorboard import SummaryWriter
 
 from uni2ts.common import hydra_util  # noqa: hydra resolvers
 from uni2ts.eval_util.evaluation import evaluate_model
-import lightning as L
 
 
 @hydra.main(version_base="1.3", config_path="conf/eval", config_name="default")
 def main(cfg: DictConfig):
-    test_data, metadata = call(cfg.data)  # Why call a data name can produce data and meta_data?
+    test_data, metadata = call(cfg.data)
     batch_size = cfg.batch_size
     while True:
-        # ToDo: Cannot directly load_from_ckpt from MoiraiForecast...
-        #  Should initialize in the same way as MoiraiFinetune.
-        model: L.LightningModule = get_class(cfg.model._target_).load_from_checkpoint(
-            **call(cfg.model._args_, _convert_="all"),
+        model = call(cfg.model, _partial_=True, _convert_="all")(
             prediction_length=metadata.prediction_length,
             target_dim=metadata.target_dim,
             feat_dynamic_real_dim=metadata.feat_dynamic_real_dim,
@@ -56,9 +52,7 @@ def main(cfg: DictConfig):
             )
             print(res)
             output_dir = HydraConfig.get().runtime.output_dir
-
             writer = SummaryWriter(log_dir=output_dir)
-            
             for name, metric in res.to_dict("records")[0].items():
                 writer.add_scalar(f"{metadata.split}_metrics/{name}", metric)
             writer.close()
