@@ -79,7 +79,7 @@ class DistrParamProj(nn.Module):
                     else proj_layer(
                         in_features,
                         tuple(dim * of for of in out_features),
-                        dim=dim,
+                        # dim=dim,
                         **kwargs,
                     )
                 ),

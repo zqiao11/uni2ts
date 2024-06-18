@@ -8,6 +8,7 @@ defaults:
   - task: null
   - _self_
 run_name: ???
+prompt: true  # ZZ: Use prompt fine-tuning or not
 seed: 0
 tf32: true
 compile: false  # set to mode: default, reduce-overhead, max-autotune

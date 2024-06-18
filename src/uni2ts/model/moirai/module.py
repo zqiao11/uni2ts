@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from jaxtyping import Bool, Float, Int
 from torch import nn
 from torch.distributions import Distribution
+
 from uni2ts.common.torch_util import mask_fill, packed_attention_mask
 from uni2ts.distribution import DistributionOutput
 from uni2ts.module.norm import RMSNorm
@@ -54,7 +55,6 @@ class MoiraiModule(nn.Module):
         self.max_seq_len = max_seq_len
         self.scaling = scaling
 
-        # how does this mask_encoding get learned?
         self.mask_encoding = nn.Embedding(num_embeddings=1, embedding_dim=d_model)
         self.scaler = PackedStdScaler() if scaling else PackedNOPScaler()
         self.in_proj = MultiInSizeLinear(
@@ -72,9 +72,7 @@ class MoiraiModule(nn.Module):
             activation=F.silu,
             use_glu=True,
             use_qk_norm=True,
-            # Binary attn bias for Variate id
-            var_attn_bias_layer=partial(BinaryAttentionBias),
-            # RoPE for Time id
+            var_attn_bias_layer=partial(BinaryAttentionBias),  # Binary attn bias for Variate id
             time_qk_proj_layer=partial(
                 QueryKeyProjection,
                 proj_layer=RotaryProjection,
@@ -138,8 +136,7 @@ class MoiraiModule(nn.Module):
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
         reprs = self.encoder(
             masked_reprs,
-            # (bs, num_patch, num_patch). If patches are from the same sample.
-            packed_attention_mask(sample_id),
+            packed_attention_mask(sample_id), # (bs, num_patch, num_patch). If patches are from the same sample.
             time_id=time_id,
             var_id=variate_id,
         )
