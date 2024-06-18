@@ -70,24 +70,24 @@ class SampleNLLLoss(_PackedNLLLoss):
 
 
 class MoiraiForecast(L.LightningModule):
-    """
-    Moirai for forecasting. Load the ckpt from fine-tuning or pre-training.
-    """
-
     def __init__(
         self,
-        module_kwargs: dict[str, Any],
         prediction_length: int,
         target_dim: int,  # Get from meta data of test dataset
         feat_dynamic_real_dim: int,
         past_feat_dynamic_real_dim: int,
         context_length: int,
+        module_kwargs: Optional[dict[str, Any]] = None,
+        module: Optional[MoiraiModule] = None,
         patch_size: int | str = "auto",
         num_samples: int = 100,
     ):
+        assert (module is not None) or (
+            module_kwargs is not None
+        ), "if module is not provided, module_kwargs is required"
         super().__init__()
-        self.save_hyperparameters()
-        self.module = MoiraiModule(**module_kwargs)
+        self.save_hyperparameters(ignore=["module"])
+        self.module = MoiraiModule(**module_kwargs) if module is None else module
         self.per_sample_loss_func = SampleNLLLoss()
 
     @contextmanager
@@ -125,12 +125,10 @@ class MoiraiForecast(L.LightningModule):
         batch_size: int,
         device: str = "auto",
     ) -> PyTorchPredictor:
-
         ts_fields = []
         if self.hparams.feat_dynamic_real_dim > 0:
             ts_fields.append("feat_dynamic_real")
             ts_fields.append("observed_feat_dynamic_real")
-
         past_ts_fields = []
         if self.hparams.past_feat_dynamic_real_dim > 0:
             past_ts_fields.append("past_feat_dynamic_real")

@@ -129,15 +129,11 @@ class LlmMoiraiFinetune(L.LightningModule):
 
     def __init__(
         self,
-        module_kwargs: dict[
-            str, Any
-        ],  # Already provided in checkpoints of Moirai classes
+        module_kwargs: dict[str, Any],
         llm_kwargs: dict[str, Any],
         proj_kwargs: dict[str, Any],
         lora_kwargs: dict[str, Any],
-        task_kwargs: dict[
-            str, Any
-        ],  # If not provided, follow MoiraiFinetune's training strategy
+        task_kwargs: dict[str, Any],
         data: str,
         min_patches: int,
         min_mask_ratio: float,

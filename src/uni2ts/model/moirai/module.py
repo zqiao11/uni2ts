@@ -20,7 +20,6 @@ import torch.nn.functional as F
 from jaxtyping import Bool, Float, Int
 from torch import nn
 from torch.distributions import Distribution
-
 from uni2ts.common.torch_util import mask_fill, packed_attention_mask
 from uni2ts.distribution import DistributionOutput
 from uni2ts.module.norm import RMSNorm
@@ -73,10 +72,10 @@ class MoiraiModule(nn.Module):
             activation=F.silu,
             use_glu=True,
             use_qk_norm=True,
-            var_attn_bias_layer=partial(
-                BinaryAttentionBias
-            ),  # Binary attn bias for Variate id
-            time_qk_proj_layer=partial(  # RoPE for Time index
+            # Binary attn bias for Variate id
+            var_attn_bias_layer=partial(BinaryAttentionBias),
+            # RoPE for Time id
+            time_qk_proj_layer=partial(
                 QueryKeyProjection,
                 proj_layer=RotaryProjection,
                 kwargs=dict(max_len=max_seq_len),
@@ -91,16 +90,12 @@ class MoiraiModule(nn.Module):
 
     def forward(
         self,
-        target: Float[
-            torch.Tensor, "*batch seq_len max_patch"
-        ],  # (bs, num_patch, max_patch_size)
-        observed_mask: Bool[
-            torch.Tensor, "*batch seq_len max_patch"
-        ],  # (bs, num_patch, max_patch_size)
-        sample_id: Int[torch.Tensor, "*batch seq_len"],  # (bs, num_patch), 0/1 in eval
-        time_id: Int[torch.Tensor, "*batch seq_len"],  # (bs, num_patch)
-        variate_id: Int[torch.Tensor, "*batch seq_len"],  # (bs, num_patch)
-        prediction_mask: Bool[torch.Tensor, "*batch seq_len"],  # (bs, num_patch)
+        target: Float[torch.Tensor, "*batch seq_len max_patch"],
+        observed_mask: Bool[torch.Tensor, "*batch seq_len max_patch"],
+        sample_id: Int[torch.Tensor, "*batch seq_len"],
+        time_id: Int[torch.Tensor, "*batch seq_len"],
+        variate_id: Int[torch.Tensor, "*batch seq_len"],
+        prediction_mask: Bool[torch.Tensor, "*batch seq_len"],
         patch_size: Int[torch.Tensor, "*batch seq_len"],
     ) -> Distribution:
         """
@@ -126,8 +121,8 @@ class MoiraiModule(nn.Module):
         # If patches from padding, their loc/scale are zeros and ones, respectively.
         loc, scale = self.scaler(
             target,
-            observed_mask
-            * ~prediction_mask.unsqueeze(-1),  # Observed and not in prediction range
+            # Observed and not in prediction range
+            observed_mask * ~prediction_mask.unsqueeze(-1),
             sample_id,
             variate_id,
         )
@@ -143,9 +138,8 @@ class MoiraiModule(nn.Module):
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
         reprs = self.encoder(
             masked_reprs,
-            packed_attention_mask(
-                sample_id
-            ),  # (bs, num_patch, num_patch). If patches are from the same sample.
+            # (bs, num_patch, num_patch). If patches are from the same sample.
+            packed_attention_mask(sample_id),
             time_id=time_id,
             var_id=variate_id,
         )

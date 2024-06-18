@@ -67,9 +67,8 @@ class RelativeAttentionBias(AttentionBias):
 class BinaryAttentionBias(AttentionBias):
     def __init__(self, dim: int, num_heads: int, num_groups: int):
         super().__init__(dim, num_heads, num_groups)
-        self.emb = nn.Embedding(
-            num_embeddings=2, embedding_dim=self.num_heads
-        )  # 2 learnable scalars for each head
+        # 2 learnable scalars for each head
+        self.emb = nn.Embedding(num_embeddings=2, embedding_dim=self.num_heads)
 
     def forward(
         self,

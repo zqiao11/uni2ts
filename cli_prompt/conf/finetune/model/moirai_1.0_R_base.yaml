@@ -27,7 +27,4 @@ beta1: 0.9
 beta2: 0.98
 num_training_steps: ${mul:${trainer.max_epochs},${train_dataloader.num_batches_per_epoch}}
 num_warmup_steps: 0
-checkpoint_path:
-  _target_: huggingface_hub.hf_hub_download
-  repo_id: Salesforce/moirai-1.0-R-base
-  filename: model.ckpt
+checkpoint_path: /home/eee/uni2ts/ckpt/moirai-1.0-R-base.ckpt

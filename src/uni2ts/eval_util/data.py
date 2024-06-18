@@ -95,10 +95,9 @@ def get_lsf_val_dataset(
     _, test_template = split(dataset, offset=-lsf_dataset.length)
     test_data = test_template.generate_instances(
         prediction_length,
-        windows=lsf_dataset.length
-        - prediction_length
-        + 1,  # number of windows/samples in test data
-        distance=1,  # distance between windows are 1. That's why windows are computed as above.
+        # number of windows/samples in test data
+        windows=lsf_dataset.length - prediction_length + 1,
+        distance=1,
     )
     metadata = MetaData(
         freq=lsf_dataset.freq,
@@ -122,10 +121,8 @@ def get_lsf_test_dataset(
     _, test_template = split(dataset, offset=-lsf_dataset.length)
     test_data = test_template.generate_instances(
         prediction_length,
-        windows=lsf_dataset.length
-        - prediction_length
-        + 1,  # number of windows/samples in test data
-        distance=1,  # distance between windows are 1. That's why windows are computed as above.
+        windows=lsf_dataset.length - prediction_length + 1,
+        distance=1,
     )
     metadata = MetaData(
         freq=lsf_dataset.freq,

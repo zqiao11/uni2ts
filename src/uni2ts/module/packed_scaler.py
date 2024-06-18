@@ -126,7 +126,7 @@ class PackedStdScaler(PackedScaler):
         var = safe_div(var, (tobs - self.correction))
         scale = torch.sqrt(var + self.minimum_scale)
 
-        # Original codes have following inplace operations without the confition.
+        # Original codes have following inplace operations without the condition.
         # But prefix tuning cannot use these!
         # It will change the version of loc and scale, even though sample_id==0 is an empty tensor.
         # Add this condition, as prefix tuning there will no sample_id == 0

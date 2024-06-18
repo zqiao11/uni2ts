@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: outputs_propmpt/${hydra:job.name}/${hydra:runtime.choices.data}/${data.dataset_name}/${data.mode}/prediction_length=${data.prediction_length}/${run_name}
+    dir: outputs/prompt_eval/${hydra:runtime.choices.data}/${data.dataset_name}/${data.mode}/prediction_length=${data.prediction_length}/${run_name}
 defaults:
   - model: ???
   - data: ???

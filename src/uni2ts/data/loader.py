@@ -126,9 +126,7 @@ class PackCollate(Collate):
         batch = sorted(
             batch, key=lambda sample: len(sample[self.target_field]), reverse=True
         )
-        bin_spaces: Int[np.ndarray, "batch"] = np.full(
-            len(batch), self.max_length
-        )  # 2 args are shape and fill_value
+        bin_spaces: Int[np.ndarray, "batch"] = np.full(len(batch), self.max_length)
         packed_batch: list[list[Sample]] = [[]]
 
         for sample in batch:
@@ -364,9 +362,8 @@ class DataLoader:  # Used in Pretrain and Finetune.
 
         self.dataloader = TorchDataLoader(
             dataset=dataset,
-            batch_size=int(
-                batch_size * batch_size_factor
-            ),  # number of samples (unpacked) for a mini batch
+            # number of samples (unpacked) for a mini batch
+            batch_size=int(batch_size * batch_size_factor),
             shuffle=shuffle,
             sampler=sampler,
             num_workers=num_workers,
@@ -377,9 +374,8 @@ class DataLoader:  # Used in Pretrain and Finetune.
             prefetch_factor=prefetch_factor if num_workers > 0 else None,
             persistent_workers=persistent_workers and num_workers > 0,
         )
-        self.batch_size = (
-            batch_size  # number of packed samples/bins in a mini batch (bs in forward)
-        )
+        # number of packed samples/bins in a mini batch (bs in forward)
+        self.batch_size = batch_size
         self.cycle = cycle
         self.num_batches_per_epoch = num_batches_per_epoch
         self.collate_fn = collate_fn

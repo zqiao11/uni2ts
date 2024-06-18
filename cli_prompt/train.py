@@ -129,6 +129,7 @@ def main(cfg: DictConfig):
         task_kwargs=instantiate(cfg.task),
     )
     model.init_after_loading_moirai()
+
     if cfg.compile:
         model.module.compile(mode=cfg.compile)
     trainer: L.Trainer = instantiate(cfg.trainer)
