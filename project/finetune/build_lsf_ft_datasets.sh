@@ -32,6 +32,7 @@ python -m uni2ts.data.builder.simple \
   "${path_prefix}/weather/weather.csv" \
   --dataset_type $ds_type\
   --offset 36887 \
+  --freq 10T \
   --normalize
 
 
