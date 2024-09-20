@@ -184,6 +184,8 @@ class SimpleDatasetBuilder(DatasetBuilder):
     weight: float = 1.0
     sample_time_series: Optional[SampleTimeSeriesType] = SampleTimeSeriesType.NONE
     storage_path: Path = env.CUSTOM_DATA_PATH
+    mean = None
+    std = None
 
     def __post_init__(self):
         self.storage_path = Path(self.storage_path)
@@ -195,6 +197,7 @@ class SimpleDatasetBuilder(DatasetBuilder):
         offset: Optional[int] = None,
         date_offset: Optional[pd.Timestamp] = None,
         freq: str = "H",
+        normalize: Optional[bool] = False,
     ):
         assert offset is None or date_offset is None, (
             "One or neither offset and date_offset must be specified, but not both. "
@@ -202,6 +205,9 @@ class SimpleDatasetBuilder(DatasetBuilder):
         )
 
         df = pd.read_csv(file, index_col=0, parse_dates=True)
+
+        if normalize:
+            df = self.scale(df, 0, len(df.index))
 
         if dataset_type == "long":
             _from_dataframe = _from_long_dataframe
@@ -238,6 +244,12 @@ class SimpleDatasetBuilder(DatasetBuilder):
             sample_time_series=self.sample_time_series,
         )
 
+    def scale(self, data, start, end):
+        train = data[start:end]
+        self.mean = train.mean(axis=0)
+        self.std = train.std(axis=0)
+        return (data - self.mean) / self.std
+
 
 @dataclass
 class SimpleEvalDatasetBuilder(DatasetBuilder):
@@ -253,8 +265,17 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
     def __post_init__(self):
         self.storage_path = Path(self.storage_path)
 
-    def build_dataset(self, file: Path, dataset_type: str, freq: str = "H"):
+    def build_dataset(
+            self, file: Path,
+            dataset_type: str, freq:
+            str = "H",
+            mean: pd.Series = None,
+            std: pd.Series = None,
+    ):
         df = pd.read_csv(file, index_col=0, parse_dates=True)
+
+        if mean is not None and std is not None:  # Qz: Normalize data like LSF
+            df = (df - mean) / std
 
         if dataset_type == "long":
             _from_dataframe = _from_long_dataframe
@@ -345,17 +366,29 @@ if __name__ == "__main__":
         default="H",  # Set the default value
         help="The user specified frequency",
     )
+    parser.add_argument(
+        "--normalize",
+        action="store_true",
+        help="Normalize train and eval data with train statistics",
+    )
 
     args = parser.parse_args()
 
-    SimpleDatasetBuilder(dataset=args.dataset_name).build_dataset(
+    # Create training dataset
+    # If offset/date_offset is not provided, the whole data will be used for training.
+    # Otherwise, only the part before offset is used for training.
+    train_dataset_builder = SimpleDatasetBuilder(dataset=args.dataset_name)
+    train_dataset_builder.build_dataset(
         file=Path(args.file_path),
         dataset_type=args.dataset_type,
         offset=args.offset,
         date_offset=pd.Timestamp(args.date_offset) if args.date_offset else None,
         freq=args.freq,
+        normalize=args.normalize,  # Qz: To align with LSF. Default is False
     )
 
+    # Create a validation dataset if offset/date_offset is provided.
+    # Eval dataset include the whole data.
     if args.offset is not None or args.date_offset is not None:
         SimpleEvalDatasetBuilder(
             f"{args.dataset_name}_eval",
@@ -366,5 +399,9 @@ if __name__ == "__main__":
             context_length=None,
             patch_size=None,
         ).build_dataset(
-            file=Path(args.file_path), dataset_type=args.dataset_type, freq=args.freq
+            file=Path(args.file_path),
+            dataset_type=args.dataset_type,
+            freq=args.freq,
+            mean=train_dataset_builder.mean,
+            std=train_dataset_builder.std,
         )
