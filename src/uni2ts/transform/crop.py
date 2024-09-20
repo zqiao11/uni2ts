@@ -13,6 +13,8 @@
 #  See the License for the specific language governing permissions and
 #  limitations under the License.
 
+import math
+import random
 from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import partial
@@ -98,6 +100,82 @@ class PatchCrop(MapFuncMixin, Transformation):
         num_patches = np.random.randint(
             self.min_time_patches, max_patches + 1
         )  # number of patches to consider
+        first = np.random.randint(
+            total_patches - num_patches + 1
+        )  # first patch to consider
+
+        start = offset + first * patch_size
+        stop = start + num_patches * patch_size
+        return start, stop
+
+
+@dataclass
+class PatchCropGivenFixedConfig(MapFuncMixin, Transformation):
+    """
+    Crop fields in a data_entry in the temporal dimension based on context_length and prediction_length.
+    :param rng: numpy random number generator
+    :param min_time_patches: minimum number of patches for time dimension
+    :param max_patches: maximum number of patches for time * dim dimension (if flatten)
+    :param will_flatten: whether time series fields will be flattened subsequently
+    :param offset: whether to offset the start of the crop
+    :param fields: fields to crop
+    """
+
+    context_length: int | list[int]
+    prediction_length: int | list[int]
+    will_flatten: bool = False
+    offset: bool = True
+    fields: tuple[str, ...] = ("target",)
+    optional_fields: tuple[str, ...] = ("past_feat_dynamic_real",)
+
+    def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        a, b = self._get_boundaries(data_entry)
+        self.map_func(
+            partial(self._crop, a=a, b=b),  # noqa
+            data_entry,
+            self.fields,
+            optional_fields=self.optional_fields,
+        )
+        return data_entry
+
+    @staticmethod
+    def _crop(data_entry: dict[str, Any], field: str, a: int, b: int) -> Sequence:
+        return [ts[a:b] for ts in data_entry[field]]
+
+    def _get_boundaries(self, data_entry: dict[str, Any]) -> tuple[int, int]:
+        patch_size = data_entry["patch_size"]
+        field: list[UnivarTimeSeries] = data_entry[self.fields[0]]
+        time = field[0].shape[0]  # num of time steps of one series
+
+        offset = (
+            np.random.randint(
+                time % patch_size + 1
+            )  # offset by [0, patch_size) so that the start is not always a multiple of patch_size
+            if self.offset
+            else 0
+        )
+        total_patches = (
+            time - offset
+        ) // patch_size  # total number of patches in time series
+
+        if isinstance(self.context_length, int):
+            self.context_length = [self.context_length]
+        if isinstance(self.prediction_length, int):
+            self.prediction_length = [self.prediction_length]
+
+        context_length = random.choice(self.context_length)
+        prediction_length = random.choice(self.prediction_length)
+        num_cont_patches = math.ceil(context_length / patch_size)
+        num_pred_patches = math.ceil(prediction_length / patch_size)
+
+        data_entry["context_length"] = context_length
+        data_entry["prediction_length"] = prediction_length
+        data_entry["num_cont_patches"] = num_cont_patches
+        data_entry["num_pred_patches"] = num_pred_patches
+
+        # number of patches to consider (along time dimension, not time * dim dimension)
+        num_patches = num_cont_patches + num_pred_patches
+
         first = np.random.randint(
             total_patches - num_patches + 1
         )  # first patch to consider

@@ -86,6 +86,60 @@ class MaskedPrediction(MapFuncMixin, CheckArrNDimMixin, Transformation):
 
 
 @dataclass
+class MaskedPredictionGivenFixedConfig(MapFuncMixin, CheckArrNDimMixin, Transformation):
+    target_field: str = "target"
+    truncate_fields: tuple[str, ...] = tuple()
+    optional_truncate_fields: tuple[str, ...] = tuple()
+    prediction_mask_field: str = "prediction_mask"
+    expected_ndim: int = 2
+
+    def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        target = data_entry[self.target_field]
+        mask_length = data_entry["num_pred_patches"]
+
+        prediction_mask = self._generate_prediction_mask(target, mask_length)
+        self.map_func(
+            partial(self._truncate, mask=prediction_mask),  # noqa
+            data_entry,
+            self.truncate_fields,
+            optional_fields=self.optional_truncate_fields,
+        )
+        data_entry[self.prediction_mask_field] = prediction_mask
+        return data_entry
+
+    def _generate_prediction_mask(
+        self, target: Float[np.ndarray, "var time *feat"], mask_length: int
+    ) -> Bool[np.ndarray, "var time"]:
+        self.check_ndim("target", target, self.expected_ndim)
+        var, time = target.shape[:2]
+        prediction_mask = np.zeros((var, time), dtype=bool)
+        prediction_mask[:, -mask_length:] = True
+        return prediction_mask
+
+    def _truncate(
+        self,
+        data_entry: dict[str, Any],
+        field: str,
+        mask: np.ndarray,
+    ) -> np.ndarray | list[np.ndarray] | dict[str, np.ndarray]:
+        arr: np.ndarray | list[np.ndarray] | dict[str, np.ndarray] = data_entry[field]
+        if isinstance(arr, list):
+            return [self._truncate_arr(a, mask) for a in arr]
+        if isinstance(arr, dict):
+            for k, v in arr.items():
+                if k in self.truncate_fields or k in self.optional_truncate_fields:
+                    arr[k] = self._truncate_arr(v, mask)
+            return arr
+        return self._truncate_arr(arr, mask)
+
+    @staticmethod
+    def _truncate_arr(
+        arr: Float[np.ndarray, "var time *feat"], mask: Bool[np.ndarray, "var time"]
+    ) -> Float[np.ndarray, "var time-mask_len *feat"]:
+        return arr[:, ~mask[0]]
+
+
+@dataclass
 class ExtendMask(CheckArrNDimMixin, CollectFuncMixin, Transformation):
     fields: tuple[str, ...]
     mask_field: str

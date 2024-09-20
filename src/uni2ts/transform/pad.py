@@ -102,3 +102,33 @@ class EvalPad(MapFuncMixin, Transformation):
         pad_width[-1] = (self.context_pad, self.prediction_pad)
         arr = np.pad(arr, pad_width, mode="constant", constant_values=np.nan)
         return arr
+
+
+@dataclass
+class MaskOutRangePaddedTokens(MapFuncMixin, Transformation):
+    fields: tuple[str, ...]
+    optional_fields: tuple[str, ...] = tuple()
+
+    def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        self.map_func(
+            self.map,
+            data_entry,
+            self.fields,
+            optional_fields=self.optional_fields,
+        )
+        return data_entry
+
+    def map(self, data_entry: dict[str, Any], field: str) -> Any:
+        patch_size = data_entry["patch_size"]
+        context_length = data_entry["context_length"]
+        prediction_length = data_entry["prediction_length"]
+
+        context_pad = -context_length % patch_size
+        prediction_pad = -prediction_length % patch_size
+
+        arr = data_entry[field]
+        arr[:, :context_pad] = np.nan
+
+        if prediction_pad > 0:
+            arr[:, -prediction_pad:] = np.nan
+        return arr
