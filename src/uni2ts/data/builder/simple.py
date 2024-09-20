@@ -266,11 +266,12 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
         self.storage_path = Path(self.storage_path)
 
     def build_dataset(
-            self, file: Path,
-            dataset_type: str, freq:
-            str = "H",
-            mean: pd.Series = None,
-            std: pd.Series = None,
+        self,
+        file: Path,
+        dataset_type: str,
+        freq: str = "H",
+        mean: pd.Series = None,
+        std: pd.Series = None,
     ):
         df = pd.read_csv(file, index_col=0, parse_dates=True)
 
