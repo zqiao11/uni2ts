@@ -23,10 +23,17 @@ from torch.utils.tensorboard import SummaryWriter
 
 from uni2ts.common import hydra_util  # noqa: hydra resolvers
 from uni2ts.eval_util.evaluation import evaluate_model
+import pandas as pd
 
 
 @hydra.main(version_base="1.3", config_path="conf/eval", config_name="default")
 def main(cfg: DictConfig):
+    # Set display options
+    pd.set_option('display.max_columns', None)
+    pd.set_option('display.width', None)
+    pd.set_option('display.max_colwidth', None)
+    pd.options.display.float_format = '{:.3f}'.format
+
     test_data, metadata = call(cfg.data)
     batch_size = cfg.batch_size
     while True:

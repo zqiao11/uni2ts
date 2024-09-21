@@ -127,6 +127,10 @@ def main(cfg: DictConfig):
     if cfg.compile:
         model.module.compile(mode=cfg.compile)
     trainer: L.Trainer = instantiate(cfg.trainer)
+
+    # '=' in ckpt name make it cannot be directly loaded with hydra. Change it to '_'.
+    trainer.callbacks[-1].CHECKPOINT_EQUALS_CHAR = '_'
+
     train_dataset: Dataset = instantiate(cfg.data).load_dataset(
         model.train_transform_map
     )
@@ -139,6 +143,10 @@ def main(cfg: DictConfig):
         else None
     )
     L.seed_everything(cfg.seed + trainer.logger.version, workers=True)
+
+    # Validate before training, check the performance of original pretrained model.
+    trainer.validate(model, datamodule=DataModule(cfg, train_dataset, val_dataset))
+
     trainer.fit(
         model,
         datamodule=DataModule(cfg, train_dataset, val_dataset),
