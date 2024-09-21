@@ -43,6 +43,24 @@ def main(cfg: DictConfig):
             feat_dynamic_real_dim=metadata.feat_dynamic_real_dim,
             past_feat_dynamic_real_dim=metadata.past_feat_dynamic_real_dim,
         )
+
+        # If eval the finetuned model, need to load moirai's frozen params manually.
+        if 'pretrained_checkpoint_path' in cfg.model:
+            checkpoint = torch.load(cfg.model.checkpoint_path)
+            tuned_state_dict = checkpoint['state_dict']
+            pretrained_moirai_state_dict = torch.load(cfg.model.pretrained_checkpoint_path, weights_only=True)
+
+            new_state_dict = {}
+            for name, tensor in pretrained_moirai_state_dict.items():
+                new_name = 'module.' + name
+                new_state_dict[new_name] = tensor
+            pretrained_moirai_state_dict = new_state_dict
+
+            frozen_moirai_state_dict = {name: tensor for name, tensor in pretrained_moirai_state_dict.items() if
+                                        name not in tuned_state_dict}
+
+            model.load_state_dict(frozen_moirai_state_dict, strict=False)
+
         metrics = instantiate(cfg.metrics, _convert_="all")
         try:
             predictor = model.create_predictor(batch_size, cfg.device)
