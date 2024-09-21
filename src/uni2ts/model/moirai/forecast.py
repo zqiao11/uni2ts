@@ -81,7 +81,7 @@ class MoiraiForecast(L.LightningModule):
         module: Optional[MoiraiModule] = None,
         patch_size: int | str = "auto",
         num_samples: int = 100,
-        pretrained_checkpoint_path: str = None
+        pretrained_checkpoint_path: str = None,
     ):
         assert (module is not None) or (
             module_kwargs is not None

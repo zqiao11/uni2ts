@@ -109,16 +109,16 @@ class MoiraiFinetune(L.LightningModule):
         context_length: Optional[int | list[int]] = None,
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
-        finetune_pattern: str | list[str]  = "full",
-            # full
-            # in_proj
-            # param_proj
-            # norm: norm1 norm2
-            # mask_encoding
-            # self_attn: q_proj, k_proj, v_proj, q_norm, k_norm, var_attn_bias, out_proj
-            # ffn: 2 * fc + 1 fc_gating.
-            # No PE, implicitly included in q_proj & k_proj as RoPE
-            # Except in_proj & param_poj, other params only have weight, without bias.
+        finetune_pattern: str | list[str] = "full",
+        # full
+        # in_proj
+        # param_proj
+        # norm: norm1 norm2
+        # mask_encoding
+        # self_attn: q_proj, k_proj, v_proj, q_norm, k_norm, var_attn_bias, out_proj
+        # ffn: 2 * fc + 1 fc_gating.
+        # No PE, implicitly included in q_proj & k_proj as RoPE
+        # Except in_proj & param_poj, other params only have weight, without bias.
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -272,39 +272,39 @@ class MoiraiFinetune(L.LightningModule):
         decay = set()
         no_decay = set()
 
-        if self.finetune_pattern == 'full':
+        if self.finetune_pattern == "full":
             pass
         else:
             for param in self.parameters():
                 param.requires_grad = False
 
         # Unfreeze the corresponding params
-        if 'param_proj' in self.finetune_pattern:
+        if "param_proj" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "param_proj" in pn:
                     p.requires_grad = True
 
-        if 'in_proj' in self.finetune_pattern:
+        if "in_proj" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "in_proj" in pn:
                     p.requires_grad = True
 
-        if 'norm' in self.finetune_pattern:  #
+        if "norm" in self.finetune_pattern:  #
             for pn, p in self.named_parameters():
                 if "norm1" in pn or "norm2" in pn:
                     p.requires_grad = True
 
-        if 'mask' in self.finetune_pattern:
+        if "mask" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "mask_encoding" in pn:
                     p.requires_grad = True
 
-        if 'ffn' in self.finetune_pattern:
+        if "ffn" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "ffn" in pn:
                     p.requires_grad = True
 
-        if 'self_attn' in self.finetune_pattern:
+        if "self_attn" in self.finetune_pattern:
             # Todo: Analyze each component in self_attn & Lora's impact.
             pass
 
