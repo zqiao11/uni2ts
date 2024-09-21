@@ -1,11 +1,12 @@
 hydra:
   run:
-    dir: outputs/finetune/${hydra:runtime.choices.model}/${hydra:runtime.choices.data}/${run_name}
+    dir: outputs/finetune/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${run_name}
 defaults:
   - model: ???
   - data: ???
   - val_data: null
   - _self_
+exp_name: ???
 run_name: ???
 seed: 0
 tf32: true
@@ -35,7 +36,7 @@ trainer:
     - _target_: lightning.pytorch.callbacks.EarlyStopping
       monitor: val/PackedNLLLoss
       min_delta: 0.0
-      patience: 3
+      patience: 30
       mode: min
       strict: false
       verbose: true
@@ -49,7 +50,7 @@ train_dataloader:
   batch_size: 32
   batch_size_factor: 2.0
   cycle: true
-  num_batches_per_epoch: 100
+  num_batches_per_epoch: 10
   shuffle: true
   num_workers: 11
   collate_fn:

@@ -1,11 +1,11 @@
 hydra:
   run:
-    dir: outputs/${hydra:job.name}/${hydra:runtime.choices.data}/${data.dataset_name}/${data.mode}/prediction_length=${data.prediction_length}/${run_name}
+    dir: outputs/eval/${hydra:runtime.choices.model}/${exp_name}/${data.dataset_name}/${data.mode}/cl${model.context_length}_pl${data.prediction_length}
 defaults:
   - model: ???
   - data: ???
   - _self_
-run_name: ???
+exp_name: ???
 metrics:
   - _target_: gluonts.ev.metrics.MSE
   - _target_: uni2ts.eval_util.metrics.MedianMSE
