@@ -53,10 +53,14 @@ from uni2ts.transform import (
     FlatPackCollection,
     FlatPackFields,
     GetPatchSize,
+    Identity,
     ImputeTimeSeries,
     MaskedPrediction,
+    MaskedPredictionGivenFixedConfig,
+    MaskOutRangePaddedTokens,
     PackFields,
     PatchCrop,
+    PatchCropGivenFixedConfig,
     Patchify,
     SelectFields,
     SequencifyField,
@@ -102,6 +106,19 @@ class MoiraiFinetune(L.LightningModule):
         lr: float = 1e-3,
         weight_decay: float = 1e-2,
         log_on_step: bool = False,
+        context_length: Optional[int | list[int]] = None,
+        prediction_length: Optional[int | list[int]] = None,
+        patch_size: Optional[int] = None,
+        finetune_pattern: str | list[str]  = "full",
+            # full
+            # in_proj
+            # param_proj
+            # norm: norm1 norm2
+            # mask_encoding
+            # self_attn: q_proj, k_proj, v_proj, q_norm, k_norm, var_attn_bias, out_proj
+            # ffn: 2 * fc + 1 fc_gating.
+            # No PE, implicitly included in q_proj & k_proj as RoPE
+            # Except in_proj & param_poj, other params only have weight, without bias.
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -112,6 +129,11 @@ class MoiraiFinetune(L.LightningModule):
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
         self.module = MoiraiModule(**module_kwargs) if module is None else module
+
+        self.context_length = context_length
+        self.prediction_length = prediction_length
+        self.patch_size = patch_size
+        self.finetune_pattern = finetune_pattern
 
     def forward(
         self,
@@ -250,6 +272,42 @@ class MoiraiFinetune(L.LightningModule):
         decay = set()
         no_decay = set()
 
+        if self.finetune_pattern == 'full':
+            pass
+        else:
+            for param in self.parameters():
+                param.requires_grad = False
+
+        # Unfreeze the corresponding params
+        if 'param_proj' in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "param_proj" in pn:
+                    p.requires_grad = True
+
+        if 'in_proj' in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "in_proj" in pn:
+                    p.requires_grad = True
+
+        if 'norm' in self.finetune_pattern:  #
+            for pn, p in self.named_parameters():
+                if "norm1" in pn or "norm2" in pn:
+                    p.requires_grad = True
+
+        if 'mask' in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "mask_encoding" in pn:
+                    p.requires_grad = True
+
+        if 'ffn' in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "ffn" in pn:
+                    p.requires_grad = True
+
+        if 'self_attn' in self.finetune_pattern:
+            # Todo: Analyze each component in self_attn & Lora's impact.
+            pass
+
         whitelist_params = (
             LearnedProjection,
             MultiInSizeLinear,
@@ -279,6 +337,8 @@ class MoiraiFinetune(L.LightningModule):
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
+        self.trainable_params = param_dict
+
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert (
@@ -336,16 +396,31 @@ class MoiraiFinetune(L.LightningModule):
                     min_time_patches=self.hparams.min_patches,
                     target_field="target",
                     patch_sizes=self.module.patch_sizes,
-                    patch_size_constraints=DefaultPatchSizeConstraints(),
+                    patch_size_constraints=(
+                        DefaultPatchSizeConstraints()
+                        if self.patch_size is None
+                        else FixedPatchSizeConstraints(self.patch_size)
+                    ),
                     offset=True,
                 )
-                + PatchCrop(
-                    min_time_patches=self.hparams.min_patches,
-                    max_patches=self.module.max_seq_len,
-                    will_flatten=True,
-                    offset=True,
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
+                + (
+                    PatchCrop(
+                        min_time_patches=self.hparams.min_patches,
+                        max_patches=self.module.max_seq_len,
+                        will_flatten=True,
+                        offset=True,
+                        fields=("target",),
+                        optional_fields=("past_feat_dynamic_real",),
+                    )
+                    if self.context_length is None or self.prediction_length is None
+                    else PatchCropGivenFixedConfig(
+                        context_length=self.context_length,
+                        prediction_length=self.prediction_length,
+                        will_flatten=True,
+                        offset=True,
+                        fields=("target",),
+                        optional_fields=("past_feat_dynamic_real",),
+                    )
                 )
                 + PackFields(
                     output_field="target",
@@ -355,6 +430,15 @@ class MoiraiFinetune(L.LightningModule):
                     output_field="past_feat_dynamic_real",
                     fields=tuple(),
                     optional_fields=("past_feat_dynamic_real",),
+                )
+                # Set the padded tokens in context (1st patch) and in prediction (the last patch) as Nan.
+                + (
+                    Identity()
+                    if self.context_length is None or self.prediction_length is None
+                    else MaskOutRangePaddedTokens(
+                        fields=("target",),
+                        optional_fields=("past_feat_dynamic_real",),
+                    )
                 )
                 + AddObservedMask(
                     fields=("target",),
@@ -388,14 +472,24 @@ class MoiraiFinetune(L.LightningModule):
                     expected_ndim=3,
                     collection_type=dict,
                 )
-                + MaskedPrediction(
-                    min_mask_ratio=self.hparams.min_mask_ratio,
-                    max_mask_ratio=self.hparams.max_mask_ratio,
-                    target_field="target",
-                    truncate_fields=("variate_id", "time_id", "observed_mask"),
-                    optional_truncate_fields=("past_feat_dynamic_real",),
-                    prediction_mask_field="prediction_mask",
-                    expected_ndim=3,
+                + (
+                    MaskedPrediction(
+                        min_mask_ratio=self.hparams.min_mask_ratio,
+                        max_mask_ratio=self.hparams.max_mask_ratio,
+                        target_field="target",
+                        truncate_fields=("variate_id", "time_id", "observed_mask"),
+                        optional_truncate_fields=("past_feat_dynamic_real",),
+                        prediction_mask_field="prediction_mask",
+                        expected_ndim=3,
+                    )
+                    if self.context_length is None or self.prediction_length is None
+                    else MaskedPredictionGivenFixedConfig(
+                        target_field="target",
+                        truncate_fields=("variate_id", "time_id", "observed_mask"),
+                        optional_truncate_fields=("past_feat_dynamic_real",),
+                        prediction_mask_field="prediction_mask",
+                        expected_ndim=3,
+                    )
                 )
                 + ExtendMask(
                     fields=tuple(),
@@ -546,6 +640,21 @@ class MoiraiFinetune(L.LightningModule):
             )
 
         return defaultdict(lambda: default_val_transform)
+
+    def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
+        """
+        Modify state_dict to only save trainable params.
+        Note the default state_dict saved by PL converts all params to require_grads=False
+        """
+        state = super().state_dict(
+            destination=destination, prefix=prefix, keep_vars=keep_vars
+        )
+        filtered_state = {
+            name: tensor
+            for name, tensor in state.items()
+            if name in self.trainable_params
+        }
+        return filtered_state
 
 
 class MoiraiLinearProbe(MoiraiFinetune): ...
