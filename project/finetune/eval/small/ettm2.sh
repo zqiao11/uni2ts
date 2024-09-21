@@ -9,7 +9,7 @@ exp_name=lsf_finetune
 cl=3000
 model=moirai_lightning_ckpt
 
-b
+
 cpp1='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm2/cl3000_pl96/checkpoints/epoch_0-step_10.ckpt'
 cpp2='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm2/cl3000_pl192/checkpoints/epoch_6-step_70.ckpt'
 cpp3='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm2/cl3000_pl336/checkpoints/epoch_2-step_30.ckpt'
