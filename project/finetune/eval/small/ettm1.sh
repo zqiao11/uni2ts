@@ -10,10 +10,10 @@ cl=3000
 model=moirai_lightning_ckpt
 
 
-cpp1='./outputs/finetune/moirai_1.0_R_small/lsf/ettm1/cl3000_pl96/checkpoints/epoch\=113-step\=1140.ckpt'
-cpp2='./outputs/finetune/moirai_1.0_R_small/lsf/ettm1/cl3000_pl192/checkpoints/epoch\=0-step\=10.ckpt'
-cpp3='./outputs/finetune/moirai_1.0_R_small/lsf/ettm1/cl3000_pl336/checkpoints/epoch\=70-step\=710.ckpt'
-cpp4='./outputs/finetune/moirai_1.0_R_small/lsf/ettm1/cl3000_pl720/checkpoints/epoch\=54-step\=550.ckpt'
+cpp1='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm1/cl3000_pl96/checkpoints/epoch_4-step_50.ckpt'
+cpp2='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm1/cl3000_pl192/checkpoints/epoch_2-step_30.ckpt'
+cpp3='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm1/cl3000_pl336/checkpoints/epoch_0-step_10.ckpt'
+cpp4='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm1/cl3000_pl720/checkpoints/epoch_0-step_10.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

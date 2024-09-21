@@ -9,11 +9,11 @@ exp_name=lsf_finetune
 cl=3000
 model=moirai_lightning_ckpt
 
-
-cpp1='/home/zhongzheng/uni2ts-mm/outputs/finetune/moirai_1.0_R_small/lsf/ettm2/cl3000_pl96/checkpoints/epoch_55-step_5600.ckpt'
-cpp2='/home/zhongzheng/uni2ts-mm/outputs/finetune/moirai_1.0_R_small/lsf/ettm2/cl3000_pl192/checkpoints/epoch_32-step_3300.ckpt'
-cpp3='/home/zhongzheng/uni2ts-mm/outputs/finetune/moirai_1.0_R_small/lsf/ettm2/cl3000_pl336/checkpoints/epoch_9-step_1000.ckpt'
-cpp4='/home/zhongzheng/uni2ts-mm/outputs/finetune/moirai_1.0_R_small/lsf/ettm2/cl3000_pl720/checkpoints/epoch_2-step_300.ckpt'
+b
+cpp1='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm2/cl3000_pl96/checkpoints/epoch_0-step_10.ckpt'
+cpp2='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm2/cl3000_pl192/checkpoints/epoch_6-step_70.ckpt'
+cpp3='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm2/cl3000_pl336/checkpoints/epoch_2-step_30.ckpt'
+cpp4='./outputs/finetune/moirai_1.1_R_small/lsf/full/ettm2/cl3000_pl720/checkpoints/epoch_1-step_20.ckpt'
 index=1
 for pl in 96 192 336 720; do
   case $index in

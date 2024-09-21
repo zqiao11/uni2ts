@@ -32,5 +32,5 @@ for pl in 96 192 336 720; do
   val_data._args_.patch_sizes=[64] \
   val_data._args_.context_lengths=[$cl] \
   val_data._args_.prediction_lengths=[$pl] \
-  train_dataloader.num_batches_per_epoch=200
+  train_dataloader.num_batches_per_epoch=300
 done
