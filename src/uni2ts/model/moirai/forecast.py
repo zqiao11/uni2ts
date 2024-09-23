@@ -90,6 +90,7 @@ class MoiraiForecast(L.LightningModule):
         self.save_hyperparameters(ignore=["module"])
         self.module = MoiraiModule(**module_kwargs) if module is None else module
         self.per_sample_loss_func = SampleNLLLoss()
+        self.strict_loading = False
 
     @contextmanager
     def hparams_context(
