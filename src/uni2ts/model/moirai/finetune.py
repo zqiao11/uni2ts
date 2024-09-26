@@ -304,9 +304,41 @@ class MoiraiFinetune(L.LightningModule):
                 if "ffn" in pn:
                     p.requires_grad = True
 
-        if "self_attn" in self.finetune_pattern:
-            # Todo: Analyze each component in self_attn & Lora's impact.
-            pass
+        # if "self_attn" in self.finetune_pattern:
+        #     # Todo: Analyze each component in self_attn & Lora's impact.
+        #     pass
+
+        if "q_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "q_proj" in pn:
+                    p.requires_grad = True
+
+        if "k_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "k_proj" in pn:
+                    p.requires_grad = True
+
+        if "v_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "v_proj" in pn:
+                    p.requires_grad = True
+
+        if "att_norm" in self.finetune_pattern:  #
+            for pn, p in self.named_parameters():
+                if "self_attn.q_norm" in pn or "self_attn.k_norm" in pn:
+                    p.requires_grad = True
+
+
+        if "var_attn_bias" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "var_attn_bias" in pn:
+                    p.requires_grad = True
+
+        if "out_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "out_proj" in pn:
+                    p.requires_grad = True
+
 
         whitelist_params = (
             LearnedProjection,
