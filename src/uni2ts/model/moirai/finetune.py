@@ -328,7 +328,6 @@ class MoiraiFinetune(L.LightningModule):
                 if "self_attn.q_norm" in pn or "self_attn.k_norm" in pn:
                     p.requires_grad = True
 
-
         if "var_attn_bias" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "var_attn_bias" in pn:
@@ -338,7 +337,6 @@ class MoiraiFinetune(L.LightningModule):
             for pn, p in self.named_parameters():
                 if "out_proj" in pn:
                     p.requires_grad = True
-
 
         whitelist_params = (
             LearnedProjection,
