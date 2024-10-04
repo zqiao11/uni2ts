@@ -121,3 +121,18 @@ class CheckArrNDimMixin:
                 f"has expected ndim: {expected_ndim}, "
                 f"but got ndim: {arr.ndim} of shape {arr.shape}."
             )
+
+
+class AddNewArrMixin:
+    @staticmethod
+    def apply_func(
+        func: Callable[[dict[str, Any], str], np.ndarray],
+        data_entry: dict[str, Any],
+        fields: tuple[str, ...],
+        optional_fields: tuple[str, ...] = (),
+    ):
+        for field in fields:
+            return func(data_entry, field)
+        for field in optional_fields:
+            if field in data_entry:
+                func(data_entry, field)

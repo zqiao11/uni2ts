@@ -18,6 +18,12 @@ from .crop import EvalCrop, PatchCrop, PatchCropGivenFixedConfig
 from .feature import AddObservedMask, AddTimeIndex, AddVariateIndex
 from .field import LambdaSetFieldIfNotPresent, RemoveFields, SelectFields, SetValue
 from .imputation import DummyValueImputation, ImputeTimeSeries, LastValueImputation
+from .multi_scale import (
+    AddNewFreqScaleSeries,
+    AddNewScaleSeries,
+    MultiScaleMaskedPredictionGivenFixedConfig,
+    PadNewScaleSeries,
+)
 from .pad import EvalPad, MaskOutRangePaddedTokens, Pad, PadFreq
 from .patch import (
     DefaultPatchSizeConstraints,
@@ -43,6 +49,8 @@ from .task import (
 )
 
 __all__ = [
+    "AddNewScaleSeries",
+    "AddNewFreqScaleSeries",
     "AddObservedMask",
     "AddTimeIndex",
     "AddVariateIndex",
@@ -64,10 +72,12 @@ __all__ = [
     "MaskedPrediction",
     "MaskedPredictionGivenFixedConfig",
     "MaskOutRangePaddedTokens",
+    "MultiScaleMaskedPredictionGivenFixedConfig",
     "PackCollection",
     "PackFields",
     "Pad",
     "PadFreq",
+    "PadNewScaleSeries",
     "PatchCrop",
     "PatchCropGivenFixedConfig",
     "PatchSizeConstraints",
