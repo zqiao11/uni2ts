@@ -41,6 +41,11 @@ from .reshape import (
     SequencifyField,
     Transpose,
 )
+from .seasonal_naive import (
+    AddSeasonalNaiveTarget,
+    GetSeasonalNaivePrediction,
+    SeasonalNaiveEvalCrop,
+)
 from .task import (
     EvalMaskedPrediction,
     ExtendMask,
@@ -89,4 +94,7 @@ __all__ = [
     "SetValue",
     "Transformation",
     "Transpose",
+    "GetSeasonalNaivePrediction",
+    "AddSeasonalNaiveTarget",
+    "SeasonalNaiveEvalCrop",
 ]
