@@ -14,6 +14,7 @@
 #  limitations under the License.
 
 import math
+import re
 from contextlib import contextmanager
 from copy import deepcopy
 from typing import Any, Generator, Optional
@@ -39,7 +40,6 @@ from uni2ts.common.torch_util import safe_div
 from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
 
 from .module import MoiraiModule
-import re
 
 
 class SampleNLLLoss(_PackedNLLLoss):
@@ -565,7 +565,7 @@ class MultiScaleMoiraiForecast(L.LightningModule):
 
         # ToDO: Interface for freq
         # freq = 'H'
-        freq = '10T'
+        freq = "10T"
 
         dim_count = 0
 
@@ -577,7 +577,6 @@ class MultiScaleMoiraiForecast(L.LightningModule):
             time_id = []
             variate_id = []
             prediction_mask = []
-
 
             if i == 0:
                 past_target = past_target
@@ -593,20 +592,31 @@ class MultiScaleMoiraiForecast(L.LightningModule):
             else:
                 # Downsample
                 past_target = self._downsample(past_target, freq, left=True)
-                past_observed_target = self._downsample(past_observed_target, freq, left=True)
-                past_is_pad = self._downsample(past_is_pad.bool(), freq, left=False).int()
+                past_observed_target = self._downsample(
+                    past_observed_target, freq, left=True
+                )
+                past_is_pad = self._downsample(
+                    past_is_pad.bool(), freq, left=False
+                ).int()
 
                 future_target = self._downsample(future_target, freq, left=False)
-                future_observed_target = self._downsample(future_observed_target, freq, left=False)
-                future_is_pad = self._downsample(future_is_pad.bool(), freq, left=False).int()
+                future_observed_target = self._downsample(
+                    future_observed_target, freq, left=False
+                )
+                future_is_pad = self._downsample(
+                    future_is_pad.bool(), freq, left=False
+                ).int()
 
                 # Compute new lengths
                 # prediction_length = math.ceil(prediction_length / self.DOWN_SAMPLE_FACTOR[freq])
                 # context_length = math.ceil(context_length / self.DOWN_SAMPLE_FACTOR[freq])
 
-                prediction_length = math.ceil(prediction_length / self.get_downsample_factor(freq)[0])
-                context_length = math.ceil(context_length / self.get_downsample_factor(freq)[0])
-
+                prediction_length = math.ceil(
+                    prediction_length / self.get_downsample_factor(freq)[0]
+                )
+                context_length = math.ceil(
+                    context_length / self.get_downsample_factor(freq)[0]
+                )
 
             if future_target is None:
 
@@ -624,7 +634,9 @@ class MultiScaleMoiraiForecast(L.LightningModule):
                 [
                     torch.nn.functional.pad(
                         rearrange(
-                            self._patched_seq_pad(patch_size, past_target, -2, left=True),
+                            self._patched_seq_pad(
+                                patch_size, past_target, -2, left=True
+                            ),
                             "... (seq patch) dim -> ... (dim seq) patch",
                             patch=patch_size,
                         ),
@@ -721,8 +733,10 @@ class MultiScaleMoiraiForecast(L.LightningModule):
                 ]
             )
 
-            past_seq_id, future_seq_id = self._generate_time_id(  # (bs, num_pas_patch)  (bs, num_future_patch)
-                patch_size, prediction_length, past_observed_target
+            past_seq_id, future_seq_id = (
+                self._generate_time_id(  # (bs, num_pas_patch)  (bs, num_future_patch)
+                    patch_size, prediction_length, past_observed_target
+                )
             )
 
             time_id.extend(
@@ -740,18 +754,22 @@ class MultiScaleMoiraiForecast(L.LightningModule):
                     repeat(
                         torch.arange(past_target.shape[-1], device=device) + dim_count,
                         f"dim -> {' '.join(map(str, batch_shape))} (dim future)",
-                        future=self.prediction_token_length(patch_size, prediction_length),
+                        future=self.prediction_token_length(
+                            patch_size, prediction_length
+                        ),
                     ),
                 ]
             )
             dim_count += past_target.shape[-1]
 
-
             prediction_mask.extend(
                 [
                     torch.zeros(
                         batch_shape
-                        + (self.context_token_length(patch_size, context_length) * past_target.shape[-1],),
+                        + (
+                            self.context_token_length(patch_size, context_length)
+                            * past_target.shape[-1],
+                        ),
                         dtype=torch.bool,
                         device=device,
                     ),
@@ -989,8 +1007,6 @@ class MultiScaleMoiraiForecast(L.LightningModule):
             variate_id = torch.cat(variate_id, dim=-1)
             prediction_mask = torch.cat(prediction_mask, dim=-1)
 
-
-
             target_all_scales.append(target)
             observed_mask_all_scales.append(observed_mask)
             sample_id_all_scales.append(sample_id)
@@ -999,7 +1015,6 @@ class MultiScaleMoiraiForecast(L.LightningModule):
             prediction_mask_all_scales.append(prediction_mask)
 
             # ToDo: Update freq
-
 
         target = torch.cat(target_all_scales, dim=-2)
         observed_mask = torch.cat(observed_mask_all_scales, dim=-2)
@@ -1017,7 +1032,9 @@ class MultiScaleMoiraiForecast(L.LightningModule):
             prediction_mask,
         )
 
-    def _downsample(self, arr: torch.Tensor, freq: str, left: bool = True) -> torch.Tensor:
+    def _downsample(
+        self, arr: torch.Tensor, freq: str, left: bool = True
+    ) -> torch.Tensor:
         # Check if the input tensor is 2D (bs, time) or 3D (*bs, time, feature)
         if arr.ndim == 2:
             # 2D case: arr is (bs, time) without feature dimension
@@ -1029,7 +1046,9 @@ class MultiScaleMoiraiForecast(L.LightningModule):
             *bs, time, feature = arr.shape
             dim_time = -2
         else:
-            raise ValueError("Input tensor must be either 2D (bs, time) or 3D (*bs, time, feature)")
+            raise ValueError(
+                "Input tensor must be either 2D (bs, time) or 3D (*bs, time, feature)"
+            )
 
         # Todo: Revise here
         # ds_factor = self.DOWN_SAMPLE_FACTOR[freq]
@@ -1039,12 +1058,16 @@ class MultiScaleMoiraiForecast(L.LightningModule):
         if arr.dtype == torch.bool or arr.dtype == torch.int:
             pad_value = False  # Use False for Bool tensors
         else:
-            pad_value = float('nan')  # Use NaN for float tensors
+            pad_value = float("nan")  # Use NaN for float tensors
 
         # Apply padding to make the time dimension divisible by ds_factor
-        arr = self._patched_seq_pad(ds_factor, arr, dim=dim_time, left=left, value=pad_value)
+        arr = self._patched_seq_pad(
+            ds_factor, arr, dim=dim_time, left=left, value=pad_value
+        )
 
-        new_arr_length = math.ceil(time / ds_factor)  # Compute the expected new time length after downsampling
+        new_arr_length = math.ceil(
+            time / ds_factor
+        )  # Compute the expected new time length after downsampling
 
         # If the tensor is 2D, add a singleton feature dimension to match the 3D case
         if arr.ndim == 2:
@@ -1055,15 +1078,21 @@ class MultiScaleMoiraiForecast(L.LightningModule):
 
         # Downsample based on tensor type
         if arr.dtype == torch.bool:
-            arr_new = torch.any(arr, dim=-2)  # For Bool tensors, check if any value in the window is True
+            arr_new = torch.any(
+                arr, dim=-2
+            )  # For Bool tensors, check if any value in the window is True
         else:
-            arr_new = torch.nanmean(arr, dim=-2)  # For float tensors, compute the mean, ignoring NaN values
+            arr_new = torch.nanmean(
+                arr, dim=-2
+            )  # For float tensors, compute the mean, ignoring NaN values
 
         # If the input was 2D, remove the singleton feature dimension
         if feature is None:
             arr_new = arr_new.squeeze(-1)
 
-        assert arr_new.shape[dim_time] == new_arr_length, "Error occurs during downsampling!"
+        assert (
+            arr_new.shape[dim_time] == new_arr_length
+        ), "Error occurs during downsampling!"
 
         return arr_new
 
@@ -1074,8 +1103,12 @@ class MultiScaleMoiraiForecast(L.LightningModule):
         target_dim: int,
     ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
         # ToDo: Change start and end. Only extract the origin scale's prediction part
-        start = target_dim * self.context_token_length(patch_size, self.hparams.context_length)
-        end = start + target_dim * self.prediction_token_length(patch_size, self.hparams.prediction_length)
+        start = target_dim * self.context_token_length(
+            patch_size, self.hparams.context_length
+        )
+        end = start + target_dim * self.prediction_token_length(
+            patch_size, self.hparams.prediction_length
+        )
         preds = preds[..., start:end, :patch_size]
         preds = rearrange(
             preds,
@@ -1135,7 +1168,9 @@ class MultiScaleMoiraiForecast(L.LightningModule):
 
             # If there's a numeric prefix, adjust the factor by dividing it
             if num_part is not None:
-                ds_factor = ds_factor // int(num_part)  # Adjust by dividing the original factor
+                ds_factor = ds_factor // int(
+                    num_part
+                )  # Adjust by dividing the original factor
 
             return ds_factor, freq_unit
         else:

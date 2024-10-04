@@ -1,19 +1,124 @@
-
-from dataclasses import dataclass
-from jaxtyping import Bool, Float
-from typing import Any
-import numpy as np
-from ._base import Transformation
-from ._mixin import AddNewArrMixin, ApplyFuncMixin, CheckArrNDimMixin, CollectFuncMixin, MapFuncMixin
 import math
-from einops import pack
 import re
+from dataclasses import dataclass
+from typing import Any
+
+import numpy as np
+from einops import pack
+from jaxtyping import Bool, Float
+
+from ._base import Transformation
+from ._mixin import (
+    AddNewArrMixin,
+    ApplyFuncMixin,
+    CheckArrNDimMixin,
+    CollectFuncMixin,
+    MapFuncMixin,
+)
 
 
 @dataclass
-class AddNewScaleSeries(AddNewArrMixin, CheckArrNDimMixin, Transformation):
+class AddNewScaleSeries(CheckArrNDimMixin, Transformation):
     """
-    Add down-sampled new scales to data_entry
+    Add down-sampled new scales to data_entry. Each scale is downsampled by a factor of powers of 2.
+    """
+
+    target_field: str
+    num_new_scales: int
+    expected_ndim: int = 2
+    collection_type: type = list
+
+    def __post_init__(self):
+
+        self.new_arr_list = []
+        self.new_context_length_list = []
+        self.new_prediction_length_list = []
+        self.context_length_new_scales = {}
+        self.prediction_length_new_scales = {}
+
+    def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        self.__post_init__()
+        for i in range(self.num_new_scales):
+            data_entry[f"target{i+1}"] = self._downsample(
+                data_entry,
+                self.target_field,
+            )
+
+        for i in range(self.num_new_scales):
+            self.context_length_new_scales[f"target{i+1}"] = (
+                self.new_context_length_list[i]
+            )
+            self.prediction_length_new_scales[f"target{i+1}"] = (
+                self.new_prediction_length_list[i]
+            )
+        data_entry["context_length_new_scales"] = self.context_length_new_scales
+        data_entry["prediction_length_new_scales"] = self.prediction_length_new_scales
+
+        return data_entry
+
+    def _downsample(self, data_entry: dict[str, Any], field: str) -> np.ndarray:
+        if len(self.new_arr_list) == 0:
+            arr = data_entry[field]
+        else:
+            arr = self.new_arr_list[-1]
+
+        patch_size = data_entry["patch_size"]
+
+        self.check_ndim(field, arr, self.expected_ndim)
+        dim, time = arr.shape[:2]
+        ds_factor = 2 ** (len(self.new_arr_list) + 1)
+
+        if len(self.new_context_length_list) == 0:
+            context_length = data_entry["context_length"]
+            prediction_length = data_entry["prediction_length"]
+
+            # Remove padded NAN from target
+            context_pad = -context_length % patch_size
+            prediction_pad = -prediction_length % patch_size
+            if prediction_pad > 0:
+                arr = arr[:, context_pad:-prediction_pad]
+            else:
+                arr = arr[:, context_pad:]
+
+        else:
+            context_length = self.new_context_length_list[-1]
+            prediction_length = self.new_prediction_length_list[-1]
+
+        # Compute new scale's context and prediction length after padding.
+        new_context_length = math.ceil(context_length / ds_factor)
+        new_prediction_length = math.ceil(prediction_length / ds_factor)
+
+        # Pad context and prediction separately
+        context_pad = -context_length % ds_factor
+        prediction_pad = -prediction_length % ds_factor
+
+        arr = np.pad(
+            arr,
+            ((0, 0), (context_pad, prediction_pad)),
+            mode="constant",
+            constant_values=np.nan,
+        )  # Pad with NaN
+
+        # Reshape the array to apply pooling (split into non-overlapping windows)
+        arr_new = np.nanmean(
+            arr.reshape(dim, -1, ds_factor), axis=2
+        )  # Compute the mean, ignoring NaN values
+
+        assert (
+            arr_new.shape[1] == new_context_length + new_prediction_length
+        ), "Error occurs during downsampling!"
+
+        self.new_arr_list.append(arr_new)
+        self.new_context_length_list.append(new_context_length)
+        self.new_prediction_length_list.append(new_prediction_length)
+
+        return arr_new
+
+
+@dataclass
+class AddNewFreqScaleSeries(AddNewArrMixin, CheckArrNDimMixin, Transformation):
+    """
+    Add down-sampled new scales to data_entry based on its freq
     """
 
     fields: tuple[str, ...]
@@ -56,16 +161,18 @@ class AddNewScaleSeries(AddNewArrMixin, CheckArrNDimMixin, Transformation):
 
         # Save the freq for new scales
         for i in range(self.num_new_scales):
-            self.context_length_new_scales[f"target{i+1}"] = self.new_context_length_list[i]
-            self.prediction_length_new_scales[f"target{i+1}"] = self.new_prediction_length_list[i]
+            self.context_length_new_scales[f"target{i+1}"] = (
+                self.new_context_length_list[i]
+            )
+            self.prediction_length_new_scales[f"target{i+1}"] = (
+                self.new_prediction_length_list[i]
+            )
         data_entry["context_length_new_scales"] = self.context_length_new_scales
         data_entry["prediction_length_new_scales"] = self.prediction_length_new_scales
 
         return data_entry
 
-    def _downsample(
-        self, data_entry: dict[str, Any], field: str
-    ) -> np.ndarray:
+    def _downsample(self, data_entry: dict[str, Any], field: str) -> np.ndarray:
         if len(self.new_arr_list) == 0:
             arr = data_entry[field]
         else:
@@ -86,7 +193,7 @@ class AddNewScaleSeries(AddNewArrMixin, CheckArrNDimMixin, Transformation):
             context_pad = -context_length % patch_size
             prediction_pad = -prediction_length % patch_size
             if prediction_pad > 0:
-                arr = arr[:, context_pad: -prediction_pad]
+                arr = arr[:, context_pad:-prediction_pad]
             else:
                 arr = arr[:, context_pad:]
 
@@ -102,12 +209,21 @@ class AddNewScaleSeries(AddNewArrMixin, CheckArrNDimMixin, Transformation):
         context_pad = -context_length % ds_factor
         prediction_pad = -prediction_length % ds_factor
 
-        arr = np.pad(arr, ((0, 0), (context_pad, prediction_pad)), mode='constant', constant_values=np.nan)  # Pad with NaN
+        arr = np.pad(
+            arr,
+            ((0, 0), (context_pad, prediction_pad)),
+            mode="constant",
+            constant_values=np.nan,
+        )  # Pad with NaN
 
         # Reshape the array to apply pooling (split into non-overlapping windows)
-        arr_new = np.nanmean(arr.reshape(dim, -1, ds_factor), axis=2)   # Compute the mean, ignoring NaN values
+        arr_new = np.nanmean(
+            arr.reshape(dim, -1, ds_factor), axis=2
+        )  # Compute the mean, ignoring NaN values
 
-        assert arr_new.shape[1] == new_context_length + new_prediction_length, "Error occurs during downsampling!"
+        assert (
+            arr_new.shape[1] == new_context_length + new_prediction_length
+        ), "Error occurs during downsampling!"
 
         self.new_arr_list.append(arr_new)
         self.freq_per_scale.append(self.get_next_freq(freq_unit))
@@ -134,7 +250,9 @@ class AddNewScaleSeries(AddNewArrMixin, CheckArrNDimMixin, Transformation):
 
             # If there's a numeric prefix, adjust the factor by dividing it
             if num_part is not None:
-                ds_factor = ds_factor // int(num_part)  # Adjust by dividing the original factor
+                ds_factor = ds_factor // int(
+                    num_part
+                )  # Adjust by dividing the original factor
 
             return ds_factor, freq_unit
         else:
@@ -146,6 +264,7 @@ class PadNewScaleSeries(MapFuncMixin, Transformation):
     """
     Pad the new scale series for patching. Make their lengths divisible by patch_size.
     """
+
     fields: tuple[str, ...]
     optional_fields: tuple[str, ...] = tuple()
 
@@ -174,8 +293,10 @@ class PadNewScaleSeries(MapFuncMixin, Transformation):
 
 
 @dataclass
-class MultiScaleMaskedPredictionGivenFixedConfig(MapFuncMixin, CheckArrNDimMixin, Transformation):
-    target_fields: tuple[str, ...]  = ("target", )
+class MultiScaleMaskedPredictionGivenFixedConfig(
+    MapFuncMixin, CheckArrNDimMixin, Transformation
+):
+    target_fields: tuple[str, ...] = ("target",)
     prediction_mask_field: str = "prediction_mask"
     expected_ndim: int = 2
 
@@ -186,11 +307,14 @@ class MultiScaleMaskedPredictionGivenFixedConfig(MapFuncMixin, CheckArrNDimMixin
             target = data_entry[field]
 
             # Todo: 求不同scale的mask length
-            if field == 'target':
+            if field == "target":
                 mask_length = data_entry["num_pred_patches"]
                 data_entry["prediction_length"]
             else:
-                mask_length = math.ceil(data_entry["prediction_length_new_scales"][field] / data_entry["patch_size"])
+                mask_length = math.ceil(
+                    data_entry["prediction_length_new_scales"][field]
+                    / data_entry["patch_size"]
+                )
 
             prediction_mask = self._generate_prediction_mask(target, mask_length)
 
@@ -214,7 +338,6 @@ class MultiScaleMaskedPredictionGivenFixedConfig(MapFuncMixin, CheckArrNDimMixin
         prediction_mask = np.zeros((var, time), dtype=bool)
         prediction_mask[:, -mask_length:] = True
         return prediction_mask
-
 
 
 # @dataclass
