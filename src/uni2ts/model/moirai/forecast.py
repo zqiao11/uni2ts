@@ -36,6 +36,7 @@ from jaxtyping import Bool, Float, Int
 from torch.distributions import Distribution
 
 from uni2ts.common.torch_util import safe_div
+from uni2ts.distribution import StudentTOutput
 from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
 
 from .module import MoiraiModule
@@ -82,6 +83,7 @@ class MoiraiForecast(L.LightningModule):
         patch_size: int | str = "auto",
         num_samples: int = 100,
         pretrained_checkpoint_path: str = None,
+        replace_distr_output: bool = False,
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -91,6 +93,18 @@ class MoiraiForecast(L.LightningModule):
         self.module = MoiraiModule(**module_kwargs) if module is None else module
         self.per_sample_loss_func = SampleNLLLoss()
         self.strict_loading = False
+
+        if replace_distr_output:
+            self.replace_distr_output()
+
+    def replace_distr_output(self):
+        pretraiend_param_proj = self.module.param_proj
+        pretraiend_param_proj_student_t = pretraiend_param_proj.proj["components"][0]
+        self.module.distr_output = StudentTOutput()
+        self.module.param_proj = self.module.distr_output.get_param_proj(
+            self.module.d_model, self.module.patch_sizes
+        )
+        self.module.param_proj.proj = pretraiend_param_proj_student_t
 
     @contextmanager
     def hparams_context(

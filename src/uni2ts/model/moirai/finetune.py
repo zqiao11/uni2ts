@@ -25,6 +25,7 @@ from jaxtyping import Bool, Float, Int
 from torch import nn
 from torch.distributions import Distribution
 
+from uni2ts.distribution import StudentTOutput
 from uni2ts.loss.packed import (
     PackedDistributionLoss,
     PackedLoss,
@@ -110,6 +111,7 @@ class MoiraiFinetune(L.LightningModule):
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
+        replace_distr_output: bool = False,
         # full
         # in_proj
         # param_proj
@@ -134,6 +136,18 @@ class MoiraiFinetune(L.LightningModule):
         self.prediction_length = prediction_length
         self.patch_size = patch_size
         self.finetune_pattern = finetune_pattern
+
+    def replace_distr_output(self):
+        assert (
+            "full" in self.finetune_pattern or "param_proj" in self.finetune_pattern
+        ), "Must finetune param_proj if replace distr_output"
+        pretraiend_param_proj = self.module.param_proj
+        pretraiend_param_proj_student_t = pretraiend_param_proj.proj["components"][0]
+        self.module.distr_output = StudentTOutput()
+        self.module.param_proj = self.module.distr_output.get_param_proj(
+            self.module.d_model, self.module.patch_sizes
+        )
+        self.module.param_proj.proj = pretraiend_param_proj_student_t
 
     def forward(
         self,
@@ -272,7 +286,7 @@ class MoiraiFinetune(L.LightningModule):
         decay = set()
         no_decay = set()
 
-        if self.finetune_pattern == "full":
+        if "full" in self.finetune_pattern:
             pass
         else:
             for param in self.parameters():
@@ -304,10 +318,6 @@ class MoiraiFinetune(L.LightningModule):
                 if "ffn" in pn:
                     p.requires_grad = True
 
-        # if "self_attn" in self.finetune_pattern:
-        #     # Todo: Analyze each component in self_attn & Lora's impact.
-        #     pass
-
         if "q_proj" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "q_proj" in pn:
@@ -323,7 +333,7 @@ class MoiraiFinetune(L.LightningModule):
                 if "v_proj" in pn:
                     p.requires_grad = True
 
-        if "att_norm" in self.finetune_pattern:  #
+        if "attn_norm" in self.finetune_pattern:  #
             for pn, p in self.named_parameters():
                 if "self_attn.q_norm" in pn or "self_attn.k_norm" in pn:
                     p.requires_grad = True
@@ -336,6 +346,14 @@ class MoiraiFinetune(L.LightningModule):
         if "out_proj" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "out_proj" in pn:
+                    p.requires_grad = True
+
+        if "studentT" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if (
+                    "param_proj.proj.components.0" in pn
+                    or "param_proj.proj.weights_logits" in pn
+                ):
                     p.requires_grad = True
 
         whitelist_params = (
