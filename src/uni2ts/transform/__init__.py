@@ -22,6 +22,7 @@ from .multi_scale import (
     AddNewFreqScaleSeries,
     AddNewScaleContextSeries,
     AddNewScaleSeries,
+    MultiScaleEvalCrop,
     MultiScaleMaskedPredictionGivenFixedConfig,
     PadNewScaleSeries,
 )
@@ -79,6 +80,7 @@ __all__ = [
     "MaskedPrediction",
     "MaskedPredictionGivenFixedConfig",
     "MaskOutRangePaddedTokens",
+    "MultiScaleEvalCrop",
     "MultiScaleMaskedPredictionGivenFixedConfig",
     "PackCollection",
     "PackFields",

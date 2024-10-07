@@ -1,11 +1,14 @@
 import math
 import re
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
 from einops import pack
 from jaxtyping import Bool, Float
+
+from uni2ts.common.typing import UnivarTimeSeries
 
 from ._base import Transformation
 from ._mixin import CheckArrNDimMixin, MapFuncMixin
@@ -403,3 +406,49 @@ class MultiScaleMaskedPredictionGivenFixedConfig(CheckArrNDimMixin, Transformati
         if mask_length > 0:
             prediction_mask[:, -mask_length:] = True
         return prediction_mask
+
+
+@dataclass
+class MultiScaleEvalCrop(MapFuncMixin, Transformation):
+    offset: int
+    distance: int
+    prediction_length: int
+    context_length: int
+    fields: tuple[str, ...]
+    optional_fields: tuple[str, ...] = tuple()
+
+    def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        a, b = self._get_boundaries(data_entry)
+        self.map_func(
+            partial(self._crop, a=a, b=b),  # noqa
+            data_entry,
+            self.fields,
+            optional_fields=self.optional_fields,
+        )
+
+        data_entry["context_length"] = self.context_length
+        data_entry["prediction_length"] = self.prediction_length
+        data_entry["num_pred_patches"] = math.ceil(
+            self.prediction_length / data_entry["patch_size"]
+        )
+
+        return data_entry
+
+    @staticmethod
+    def _crop(data_entry: dict[str, Any], field: str, a: int, b: int) -> Sequence:
+        return [ts[a : b or None] for ts in data_entry[field]]
+
+    def _get_boundaries(self, data_entry: dict[str, Any]) -> tuple[int, int]:
+        field: list[UnivarTimeSeries] = data_entry[self.fields[0]]
+        time = field[0].shape[0]
+        window = data_entry["window"]
+        fcst_start = self.offset + window * self.distance
+        a = fcst_start - self.context_length
+        b = fcst_start + self.prediction_length
+
+        if self.offset >= 0:
+            assert time >= b > a >= 0
+        else:
+            assert 0 >= b > a >= -time
+
+        return a, b

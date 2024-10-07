@@ -46,8 +46,6 @@ from uni2ts.transform import (
     AddVariateIndex,
     DefaultPatchSizeConstraints,
     DummyValueImputation,
-    EvalCrop,
-    EvalMaskedPrediction,
     EvalPad,
     ExtendMask,
     FixedPatchSizeConstraints,
@@ -56,9 +54,8 @@ from uni2ts.transform import (
     GetPatchSize,
     Identity,
     ImputeTimeSeries,
-    MaskedPrediction,
-    MaskedPredictionGivenFixedConfig,
     MaskOutRangePaddedTokens,
+    MultiScaleEvalCrop,
     MultiScaleMaskedPredictionGivenFixedConfig,
     PackFields,
     PadNewScaleSeries,
@@ -574,7 +571,7 @@ class MoiraiFinetune(L.LightningModule):
                     patch_size_constraints=FixedPatchSizeConstraints(patch_size),
                     offset=True,
                 )
-                + EvalCrop(
+                + MultiScaleEvalCrop(
                     offset,
                     distance,
                     prediction_length,
