@@ -2,6 +2,7 @@ import math
 import re
 from collections.abc import Sequence
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
 import numpy as np
