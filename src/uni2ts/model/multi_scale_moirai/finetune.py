@@ -271,6 +271,11 @@ class MoiraiFinetune(L.LightningModule):
             for param in self.parameters():
                 param.requires_grad = False
 
+        # Always learn the scale embedding
+        for pn, p in self.named_parameters():
+            if "new_scale_encoding" in pn:
+                p.requires_grad = True
+
         # Unfreeze the corresponding params
         if "param_proj" in self.finetune_pattern:
             for pn, p in self.named_parameters():

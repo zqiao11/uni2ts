@@ -17,6 +17,7 @@ from functools import partial
 
 import torch
 import torch.nn.functional as F
+from einops import reduce
 from huggingface_hub import PyTorchModelHubMixin
 from hydra.utils import instantiate
 from jaxtyping import Bool, Float, Int
@@ -79,6 +80,7 @@ class MoiraiModule(
         attn_dropout_p: float,
         dropout_p: float,
         scaling: bool = True,
+        num_new_scales: int = 2,
     ):
         """
         :param distr_output: distribution output object
@@ -98,6 +100,14 @@ class MoiraiModule(
         self.scaling = scaling
 
         self.mask_encoding = nn.Embedding(num_embeddings=1, embedding_dim=d_model)
+
+        self.new_scale_encoding = nn.ModuleList(
+            [
+                nn.Embedding(num_embeddings=1, embedding_dim=d_model)
+                for _ in range(num_new_scales)
+            ]
+        )
+
         self.scaler = PackedStdScaler() if scaling else PackedNOPScaler()
         self.in_proj = MultiInSizeLinear(
             in_features_ls=patch_sizes,
@@ -127,6 +137,8 @@ class MoiraiModule(
         )
         self.distr_output = distr_output
         self.param_proj = self.distr_output.get_param_proj(d_model, patch_sizes)
+
+        self.num_new_scales = num_new_scales
 
     def forward(
         self,
@@ -167,6 +179,12 @@ class MoiraiModule(
         scaled_target = (target - loc) / scale
         reprs = self.in_proj(scaled_target, patch_size)
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
+
+        # ToDo: Plan 1. Add learnable variate embedding to the tokens of each new scales
+        masked_reprs = self.add_new_scale_embedding(
+            masked_reprs, sample_id=sample_id, variate_id=variate_id
+        )
+
         reprs = self.encoder(
             masked_reprs,
             packed_attention_mask(sample_id),
@@ -176,3 +194,43 @@ class MoiraiModule(
         distr_param = self.param_proj(reprs, patch_size)
         distr = self.distr_output.distribution(distr_param, loc=loc, scale=scale)
         return distr
+
+    def add_new_scale_embedding(
+        self,
+        reprs: Float[torch.Tensor, "*batch seq_len d_model"],
+        sample_id: Int[torch.Tensor, "*batch seq_len"],
+        variate_id: Int[torch.Tensor, "*batch seq_len"],
+    ):
+
+        # Each item has the same number of samples.
+        num_samples_per_item = torch.max(sample_id).item()
+
+        # Each sample has the same seq_len
+        sample_mask = torch.eq(sample_id.unsqueeze(-1), sample_id.unsqueeze(-2))
+        sample_seq_len = sample_mask[0][0].int().sum().item()
+
+        variate_diff = torch.diff(variate_id[0], dim=-1)
+        variate_change_points = torch.nonzero(variate_diff).flatten() + 1
+        variate_change_points = torch.cat(
+            [
+                variate_change_points,
+                torch.tensor([variate_id.shape[1]]).to(variate_id.device),
+            ]
+        )
+
+        for i in range(self.num_new_scales):
+            index_scale_i = []  # index of new scale i in all the samples
+
+            for sample in range(num_samples_per_item):
+                variate_start_idx = (
+                    variate_change_points[i].item() + sample * sample_seq_len
+                )
+                variate_end_idx = (
+                    variate_change_points[i + 1].item() + sample * sample_seq_len
+                )
+                index_scale_i.append((variate_start_idx, variate_end_idx))
+
+            for start, end in index_scale_i:
+                reprs[..., start:end, :] += self.new_scale_encoding[i].weight
+
+        return reprs
