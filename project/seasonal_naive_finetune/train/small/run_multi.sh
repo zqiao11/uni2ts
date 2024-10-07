@@ -5,3 +5,4 @@ bash project/multi_scale_finetune/train/small/etth2.sh
 bash project/multi_scale_finetune/train/small/ettm1.sh
 bash project/multi_scale_finetune/train/small/ettm2.sh
 bash project/multi_scale_finetune/train/small/weather.sh
+

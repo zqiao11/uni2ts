@@ -40,7 +40,7 @@ from uni2ts.module.position import (
 from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
 from uni2ts.transform import (
-    AddNewScaleSeries,
+    AddNewScaleContextSeries,
     AddObservedMask,
     AddTimeIndex,
     AddVariateIndex,
@@ -73,7 +73,7 @@ from uni2ts.transform import (
 from .module import MoiraiModule
 
 
-class MoiraiMultiScaleFinetune(L.LightningModule):
+class MoiraiFinetune(L.LightningModule):
     seq_fields: tuple[str, ...] = (
         "target",
         "observed_mask",
@@ -113,15 +113,7 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
-        # full
-        # in_proj
-        # param_proj
-        # norm: norm1 norm2
-        # mask_encoding
-        # self_attn: q_proj, k_proj, v_proj, q_norm, k_norm, var_attn_bias, out_proj
-        # ffn: 2 * fc + 1 fc_gating.
-        # No PE, implicitly included in q_proj & k_proj as RoPE
-        # Except in_proj & param_poj, other params only have weight, without bias.
+        num_new_scales: int = 1,
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -137,6 +129,7 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
         self.prediction_length = prediction_length
         self.patch_size = patch_size
         self.finetune_pattern = finetune_pattern
+        self.num_new_scales = num_new_scales
 
     def forward(
         self,
@@ -275,7 +268,7 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
         decay = set()
         no_decay = set()
 
-        if self.finetune_pattern == "full":
+        if "full" in self.finetune_pattern:
             pass
         else:
             for param in self.parameters():
@@ -307,9 +300,43 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                 if "ffn" in pn:
                     p.requires_grad = True
 
-        if "self_attn" in self.finetune_pattern:
-            # Todo: Analyze each component in self_attn & Lora's impact.
-            pass
+        if "q_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "q_proj" in pn:
+                    p.requires_grad = True
+
+        if "k_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "k_proj" in pn:
+                    p.requires_grad = True
+
+        if "v_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "v_proj" in pn:
+                    p.requires_grad = True
+
+        if "attn_norm" in self.finetune_pattern:  #
+            for pn, p in self.named_parameters():
+                if "self_attn.q_norm" in pn or "self_attn.k_norm" in pn:
+                    p.requires_grad = True
+
+        if "var_attn_bias" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "var_attn_bias" in pn:
+                    p.requires_grad = True
+
+        if "out_proj" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if "out_proj" in pn:
+                    p.requires_grad = True
+
+        if "studentT" in self.finetune_pattern:
+            for pn, p in self.named_parameters():
+                if (
+                    "param_proj.proj.components.0" in pn
+                    or "param_proj.proj.weights_logits" in pn
+                ):
+                    p.requires_grad = True
 
         whitelist_params = (
             LearnedProjection,
@@ -443,37 +470,24 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                         optional_fields=("past_feat_dynamic_real",),
                     )
                 )
-                #  Here target has been cropped, in form of 1d nparray.
-                #  Apply downsample here? Create a new field for each scale.
-                #  Then apply observed mask, imputation, patchify, variate id, time id independently.
-                #  Need to revise MaskedPredictionGivenFixedConfig..
-                #  ToDo: Revise this transformation: Instead of downsample based on freq, downsample by powers of 2
-                + AddNewScaleSeries(
-                    fields=("target",),
-                    num_new_scales=1,
-                    optional_fields=("past_feat_dynamic_real",),
+                #  QZ: Apply downsample to target. Create a new field 'target{i}' for each scale.
+                + AddNewScaleContextSeries(
+                    target_field="target",
+                    num_new_scales_fields=self.new_scales_target_fields,
                     expected_ndim=2,
-                    collection_type=dict,
                 )
-                # ToDo: Pad down-sampled scales. Make sure their context and prediction are dividable by patch_size
+                # Pad down-sampled scales. Make sure their context and prediction are dividable by patch_size
                 + PadNewScaleSeries(
-                    fields=("target1",),
-                    optional_fields=("past_feat_dynamic_real",),
+                    fields=self.new_scales_target_fields,
                 )
                 + AddObservedMask(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     observed_mask_field="observed_mask",
                     collection_type=dict,
                 )
                 + ImputeTimeSeries(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     imputation_method=DummyValueImputation(value=0.0),
                 )
@@ -482,16 +496,12 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                     fields=(
                         "target",
                         "observed_mask",
-                        "target1",
-                    ),
+                    )
+                    + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                # ToDo: Apply variate_id to all the scales.
                 + AddVariateIndex(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     variate_id_field="variate_id",
                     expected_ndim=3,
@@ -499,20 +509,15 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                     randomize=True,
                     collection_type=dict,
                 )
-                # ToDo: Apply time_id to all the scales.
                 + AddTimeIndex(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     time_id_field="time_id",
                     expected_ndim=3,
                     collection_type=dict,
                 )
-                # ToDo: Only apply mask prediction for original scale
                 + MultiScaleMaskedPredictionGivenFixedConfig(
-                    target_fields=("target", "target1"),
+                    target_fields=("target",) + self.new_scales_target_fields,
                     prediction_mask_field="prediction_mask",
                     expected_ndim=3,
                 )
@@ -540,7 +545,7 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                 )
                 + FlatPackFields(
                     output_field="target",
-                    fields=("target", "target1"),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     feat=True,
                 )
@@ -592,37 +597,23 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                     fields=("target",),
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                + AddNewScaleSeries(
-                    fields=("target",),
-                    num_new_scales=1,
-                    optional_fields=("past_feat_dynamic_real",),
+                + AddNewScaleContextSeries(
+                    target_field="target",
+                    num_new_scales_fields=self.new_scales_target_fields,
                     expected_ndim=2,
-                    collection_type=dict,
                 )
                 + PadNewScaleSeries(
-                    fields=("target1",),
+                    fields=self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                # + AddObservedMask(
-                #     fields=("target", ),
-                #     optional_fields=("past_feat_dynamic_real",),
-                #     observed_mask_field="observed_mask",
-                #     collection_type=dict,
-                # )
                 + AddObservedMask(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     observed_mask_field="observed_mask",
                     collection_type=dict,
                 )
                 + ImputeTimeSeries(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     imputation_method=DummyValueImputation(value=0.0),
                 )
@@ -631,33 +622,12 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                     fields=(
                         "target",
                         "observed_mask",
-                        "target1",
-                    ),
+                    )
+                    + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                # + AddObservedMask(
-                #     fields=("target",),
-                #     optional_fields=("past_feat_dynamic_real",),
-                #     observed_mask_field="observed_mask",
-                #     collection_type=dict,
-                # )
-                #
-                # + ImputeTimeSeries(
-                #     fields=("target",),
-                #     optional_fields=("past_feat_dynamic_real",),
-                #     imputation_method=DummyValueImputation(value=0.0),
-                # )
-                # + Patchify(
-                #     max_patch_size=max(self.module.patch_sizes),
-                #     fields=("target", "observed_mask"),
-                #     optional_fields=("past_feat_dynamic_real",),
-                # )
-                # ToDo: Apply variate_id to all the scales.
                 + AddVariateIndex(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     variate_id_field="variate_id",
                     expected_ndim=3,
@@ -665,53 +635,18 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                     randomize=True,
                     collection_type=dict,
                 )
-                # ToDo: Apply time_id to all the scales.
                 + AddTimeIndex(
-                    fields=(
-                        "target",
-                        "target1",
-                    ),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     time_id_field="time_id",
                     expected_ndim=3,
                     collection_type=dict,
                 )
-                # ToDo: Apply prediction mask for all the scales.
                 + MultiScaleMaskedPredictionGivenFixedConfig(
-                    target_fields=("target", "target1"),
+                    target_fields=("target",) + self.new_scales_target_fields,
                     prediction_mask_field="prediction_mask",
                     expected_ndim=3,
                 )
-                # + AddVariateIndex(
-                #     fields=("target",),
-                #     optional_fields=("past_feat_dynamic_real",),
-                #     variate_id_field="variate_id",
-                #     expected_ndim=3,
-                #     max_dim=self.hparams.max_dim,
-                #     randomize=True,
-                #     collection_type=dict,
-                # )
-                # + AddTimeIndex(
-                #     fields=("target",),
-                #     optional_fields=("past_feat_dynamic_real",),
-                #     time_id_field="time_id",
-                #     expected_ndim=3,
-                #     collection_type=dict,
-                # )
-                # + EvalMaskedPrediction(
-                #     mask_length=math.ceil(prediction_length / patch_size),
-                #     target_field="target",
-                #     truncate_fields=("variate_id", "time_id", "observed_mask"),
-                #     optional_truncate_fields=("past_feat_dynamic_real",),
-                #     prediction_mask_field="prediction_mask",
-                #     expected_ndim=3,
-                # )
-                # + ExtendMask(
-                #     fields=tuple(),
-                #     optional_fields=("past_feat_dynamic_real",),
-                #     mask_field="prediction_mask",
-                #     expected_ndim=3,
-                # )
                 + FlatPackCollection(
                     field="variate_id",
                     feat=False,
@@ -730,7 +665,7 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
                 )
                 + FlatPackFields(
                     output_field="target",
-                    fields=("target", "target1"),
+                    fields=("target",) + self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),
                     feat=True,
                 )
@@ -739,122 +674,6 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
             )
 
         return defaultdict(lambda: default_val_transform)
-
-    # @property
-    # def val_transform_map(
-    #     self,
-    # ) -> dict[str | type, Callable[..., Transformation]]:
-    #     def default_val_transform(
-    #         offset: int,
-    #         distance: int,
-    #         prediction_length: int,
-    #         context_length: int,
-    #         patch_size: int,
-    #     ):
-    #         return (
-    #             GetPatchSize(
-    #                 min_time_patches=2,
-    #                 target_field="target",
-    #                 patch_sizes=self.module.patch_sizes,
-    #                 patch_size_constraints=FixedPatchSizeConstraints(patch_size),
-    #                 offset=True,
-    #             )
-    #             + EvalCrop(
-    #                 offset,
-    #                 distance,
-    #                 prediction_length,
-    #                 context_length,
-    #                 fields=("target",),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #             )
-    #             + PackFields(
-    #                 output_field="target",
-    #                 fields=("target",),
-    #             )
-    #             + PackFields(
-    #                 output_field="past_feat_dynamic_real",
-    #                 fields=tuple(),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #             )
-    #             + EvalPad(
-    #                 prediction_pad=-prediction_length % patch_size,
-    #                 context_pad=-context_length % patch_size,
-    #                 fields=("target",),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #             )
-    #             + AddObservedMask(
-    #                 fields=("target",),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #                 observed_mask_field="observed_mask",
-    #                 collection_type=dict,
-    #             )
-    #             + ImputeTimeSeries(
-    #                 fields=("target",),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #                 imputation_method=DummyValueImputation(value=0.0),
-    #             )
-    #             + Patchify(
-    #                 max_patch_size=max(self.module.patch_sizes),
-    #                 fields=("target", "observed_mask"),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #             )
-    #             + AddVariateIndex(
-    #                 fields=("target",),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #                 variate_id_field="variate_id",
-    #                 expected_ndim=3,
-    #                 max_dim=self.hparams.max_dim,
-    #                 randomize=True,
-    #                 collection_type=dict,
-    #             )
-    #             + AddTimeIndex(
-    #                 fields=("target",),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #                 time_id_field="time_id",
-    #                 expected_ndim=3,
-    #                 collection_type=dict,
-    #             )
-    #             + EvalMaskedPrediction(
-    #                 mask_length=math.ceil(prediction_length / patch_size),
-    #                 target_field="target",
-    #                 truncate_fields=("variate_id", "time_id", "observed_mask"),
-    #                 optional_truncate_fields=("past_feat_dynamic_real",),
-    #                 prediction_mask_field="prediction_mask",
-    #                 expected_ndim=3,
-    #             )
-    #             + ExtendMask(
-    #                 fields=tuple(),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #                 mask_field="prediction_mask",
-    #                 expected_ndim=3,
-    #             )
-    #             + FlatPackCollection(
-    #                 field="variate_id",
-    #                 feat=False,
-    #             )
-    #             + FlatPackCollection(
-    #                 field="time_id",
-    #                 feat=False,
-    #             )
-    #             + FlatPackCollection(
-    #                 field="prediction_mask",
-    #                 feat=False,
-    #             )
-    #             + FlatPackCollection(
-    #                 field="observed_mask",
-    #                 feat=True,
-    #             )
-    #             + FlatPackFields(
-    #                 output_field="target",
-    #                 fields=("target",),
-    #                 optional_fields=("past_feat_dynamic_real",),
-    #                 feat=True,
-    #             )
-    #             + SequencifyField(field="patch_size", target_field="target")
-    #             + SelectFields(fields=list(self.seq_fields))
-    #         )
-    #
-    #     return defaultdict(lambda: default_val_transform)
 
     def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
         """
@@ -870,3 +689,7 @@ class MoiraiMultiScaleFinetune(L.LightningModule):
             if name in self.trainable_params
         }
         return filtered_state
+
+    @property
+    def new_scales_target_fields(self):
+        return tuple(f"target{i}" for i in range(self.num_new_scales))

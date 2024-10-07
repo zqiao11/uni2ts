@@ -8,14 +8,6 @@ exp_name=lsf
 cl=3000
 ft_pattern=full
 
-# param_proj
-# in_proj
-# norm
-# mask
-# ffn
-# param_proj + in_proj
-# param_proj + in_proj + norm
-
 ####### Electricity ######
 for pl in 96 192 336 720; do
   python -m cli.train \

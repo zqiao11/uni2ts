@@ -39,4 +39,3 @@ patch_size: null
 context_length: null
 prediction_length: null
 finetune_pattern: full
-replace_distr_output: False

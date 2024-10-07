@@ -20,6 +20,7 @@ from .field import LambdaSetFieldIfNotPresent, RemoveFields, SelectFields, SetVa
 from .imputation import DummyValueImputation, ImputeTimeSeries, LastValueImputation
 from .multi_scale import (
     AddNewFreqScaleSeries,
+    AddNewScaleContextSeries,
     AddNewScaleSeries,
     MultiScaleMaskedPredictionGivenFixedConfig,
     PadNewScaleSeries,
@@ -55,6 +56,7 @@ from .task import (
 
 __all__ = [
     "AddNewScaleSeries",
+    "AddNewScaleContextSeries",
     "AddNewFreqScaleSeries",
     "AddObservedMask",
     "AddTimeIndex",

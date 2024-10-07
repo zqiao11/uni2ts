@@ -124,10 +124,6 @@ def main(cfg: DictConfig):
 
     model: L.LightningModule = instantiate(cfg.model, _convert_="all")
 
-    # Replace the distr_ouput from the MixtureOutput to StudentTOutput
-    if cfg.model.replace_distr_output:
-        model.replace_distr_output()
-
     if cfg.compile:
         model.module.compile(mode=cfg.compile)
     trainer: L.Trainer = instantiate(cfg.trainer)

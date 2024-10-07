@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=0
 
 mode=S
-cp=conf/eval
+cp=conf/seasonal_naive_eval
 exp_name=lsf_finetune
 cl=3000
 model=moirai_lightning_ckpt

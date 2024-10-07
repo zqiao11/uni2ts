@@ -3,18 +3,10 @@
 export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.1_R_small
-cp=conf/multi_scale_finetune
+cp=conf/seasonal_naive_finetune
 exp_name=lsf
 cl=3000
-ft_pattern=in_proj+param_proj
-
-# param_proj
-# in_proj
-# norm
-# mask
-# ffn
-# param_proj + in_proj
-# param_proj + in_proj + norm
+ft_pattern=full
 
 ##### Weather ######
 for pl in 96 192 336 720; do
@@ -33,6 +25,5 @@ for pl in 96 192 336 720; do
   val_data._args_.context_lengths=[$cl] \
   val_data._args_.prediction_lengths=[$pl] \
   train_dataloader.num_batches_per_epoch=300 \
-  trainer.callbacks.2.patience=10 \
-#  model.lr=1e-4
+  trainer.callbacks.2.patience=10
 done

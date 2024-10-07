@@ -36,12 +36,6 @@ def main(cfg: DictConfig):
 
     test_data, metadata = call(cfg.data)
     batch_size = cfg.batch_size
-    if "checkpoint_path" in cfg.model:
-        checkpoint = torch.load(cfg.model.checkpoint_path)
-        hparams = checkpoint["hyper_parameters"]
-        replace_distr_output = hparams.get("replace_distr_output", False)
-    else:
-        replace_distr_output = False
 
     while True:
         model = call(cfg.model, _partial_=True, _convert_="all")(
@@ -49,11 +43,11 @@ def main(cfg: DictConfig):
             target_dim=metadata.target_dim,
             feat_dynamic_real_dim=metadata.feat_dynamic_real_dim,
             past_feat_dynamic_real_dim=metadata.past_feat_dynamic_real_dim,
-            replace_distr_output=replace_distr_output,
         )
 
-        # If eval the finetuned model, need to load moirai's frozen params manually.
+        # QZ: If eval the finetuned model, need to load moirai's frozen params manually.
         if "pretrained_checkpoint_path" in cfg.model:
+            checkpoint = torch.load(cfg.model.checkpoint_path)
             tuned_state_dict = checkpoint["state_dict"]
             pretrained_moirai_state_dict = torch.load(
                 cfg.model.pretrained_checkpoint_path, weights_only=True

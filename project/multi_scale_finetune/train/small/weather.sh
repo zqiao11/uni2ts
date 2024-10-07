@@ -6,18 +6,10 @@ model=moirai_1.1_R_small
 cp=conf/multi_scale_finetune
 exp_name=lsf
 cl=3000
-ft_pattern=norm
-
-# param_proj
-# in_proj
-# norm
-# mask
-# ffn
-# param_proj + in_proj
-# param_proj + in_proj + norm
+ft_pattern=full
 
 ##### Weather ######
-for pl in 192 336 720; do  # 96
+for pl in 96 192 336 720; do
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \
@@ -27,12 +19,11 @@ for pl in 192 336 720; do  # 96
   model.context_length=$cl \
   model.prediction_length=$pl \
   model.finetune_pattern=$ft_pattern \
-  model.lr=1e-4 \
   data=weather \
   val_data=weather \
   val_data._args_.patch_sizes=[128] \
   val_data._args_.context_lengths=[$cl] \
   val_data._args_.prediction_lengths=[$pl] \
-  train_dataloader.num_batches_per_epoch=100 \
+  train_dataloader.num_batches_per_epoch=300 \
   trainer.callbacks.2.patience=10
 done

@@ -111,7 +111,6 @@ class MoiraiFinetune(L.LightningModule):
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
-        replace_distr_output: bool = False,
         # full
         # in_proj
         # param_proj
@@ -136,18 +135,6 @@ class MoiraiFinetune(L.LightningModule):
         self.prediction_length = prediction_length
         self.patch_size = patch_size
         self.finetune_pattern = finetune_pattern
-
-    def replace_distr_output(self):
-        assert (
-            "full" in self.finetune_pattern or "param_proj" in self.finetune_pattern
-        ), "Must finetune param_proj if replace distr_output"
-        pretraiend_param_proj = self.module.param_proj
-        pretraiend_param_proj_student_t = pretraiend_param_proj.proj["components"][0]
-        self.module.distr_output = StudentTOutput()
-        self.module.param_proj = self.module.distr_output.get_param_proj(
-            self.module.d_model, self.module.patch_sizes
-        )
-        self.module.param_proj.proj = pretraiend_param_proj_student_t
 
     def forward(
         self,

@@ -31,15 +31,16 @@ trainer:
       monitor: val/PackedNLLLoss
       save_weights_only: true
       mode: min
-      save_top_k: 1
+      save_top_k: 2  # Qz: Sometimes the 1st validation gets anomalous results. Discard that ckpt, and use the 2nd one.
       every_n_epochs: 1
-    - _target_: lightning.pytorch.callbacks.EarlyStopping
+    - _target_: uni2ts.callbacks.earlystop.WarmupEarlyStopping  # lightning.pytorch.callbacks.EarlyStopping
       monitor: val/PackedNLLLoss
       min_delta: 0.0
       patience: 30
       mode: min
       strict: false
       verbose: true
+      warmup_steps: 1
   max_epochs: 1000
   enable_progress_bar: true
   accumulate_grad_batches: 1

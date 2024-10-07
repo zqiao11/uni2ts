@@ -3,11 +3,10 @@
 export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.1_R_small
-cp=conf/multi_scale_finetune
+cp=conf/seasonal_naive_finetune
 exp_name=lsf
 cl=3000
-ft_pattern=full
-
+ft_pattern=param_proj
 
 ######## ETTm2 ######
 for pl in 96 192 336 720; do

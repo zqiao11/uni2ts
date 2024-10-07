@@ -25,7 +25,6 @@ from jaxtyping import Bool, Float, Int
 from torch import nn
 from torch.distributions import Distribution
 
-from src.uni2ts.model.moirai.module import MoiraiModule
 from uni2ts.distribution import StudentTOutput
 from uni2ts.loss.packed import (
     PackedDistributionLoss,
@@ -71,6 +70,8 @@ from uni2ts.transform import (
     Transformation,
 )
 
+from .module import MoiraiModule
+
 
 class MoiraiFinetune(L.LightningModule):
     seq_fields: tuple[str, ...] = (
@@ -114,17 +115,6 @@ class MoiraiFinetune(L.LightningModule):
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
-        replace_distr_output: bool = False,
-        apply_seasonal_naive: bool = False,
-        # full
-        # in_proj
-        # param_proj
-        # norm: norm1 norm2
-        # mask_encoding
-        # self_attn: q_proj, k_proj, v_proj, q_norm, k_norm, var_attn_bias, out_proj
-        # ffn: 2 * fc + 1 fc_gating.
-        # No PE, implicitly included in q_proj & k_proj as RoPE
-        # Except in_proj & param_poj, other params only have weight, without bias.
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -134,27 +124,12 @@ class MoiraiFinetune(L.LightningModule):
         ), f"num_warmup_steps ({num_warmup_steps}) should be <= num_training_steps ({num_training_steps})."
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
-        self.module = (
-            MoiraiModule(**module_kwargs) if module is None else module
-        )  # ToDo: revise masking in module
+        self.module = MoiraiModule(**module_kwargs) if module is None else module
 
         self.context_length = context_length
         self.prediction_length = prediction_length
         self.patch_size = patch_size
         self.finetune_pattern = finetune_pattern
-        self.apply_seasonal_naive = apply_seasonal_naive
-
-    def replace_distr_output(self):
-        assert (
-            "full" in self.finetune_pattern or "param_proj" in self.finetune_pattern
-        ), "Must finetune param_proj if replace distr_output"
-        pretraiend_param_proj = self.module.param_proj
-        pretraiend_param_proj_student_t = pretraiend_param_proj.proj["components"][0]
-        self.module.distr_output = StudentTOutput()
-        self.module.param_proj = self.module.distr_output.get_param_proj(
-            self.module.d_model, self.module.patch_sizes
-        )
-        self.module.param_proj.proj = pretraiend_param_proj_student_t
 
     def forward(
         self,
@@ -181,21 +156,14 @@ class MoiraiFinetune(L.LightningModule):
         self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
 
-        if self.apply_seasonal_naive:
-            distr = self(
-                **{
-                    field: batch[field if field != "target" else "naive_target"]
-                    for field in list(self.seq_fields) + ["sample_id"]
-                    if field != "naive_target"
-                }
-            )
-        else:
-            distr = self(
-                **{
-                    field: batch[field]
-                    for field in list(self.seq_fields) + ["sample_id"]
-                }
-            )
+        distr = self(
+            **{
+                field: batch[field if field != "target" else "naive_target"]
+                for field in list(self.seq_fields) + ["sample_id"]
+                if field != "naive_target"
+            }
+        )
+
         loss = self.hparams.loss_func(
             pred=distr,
             **{
@@ -228,21 +196,15 @@ class MoiraiFinetune(L.LightningModule):
     def validation_step(
         self, batch: dict[str, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
-        if self.apply_seasonal_naive:
-            distr = self(
-                **{
-                    field: batch[field if field != "target" else "naive_target"]
-                    for field in list(self.seq_fields) + ["sample_id"]
-                    if field != "naive_target"
-                }
-            )
-        else:
-            distr = self(
-                **{
-                    field: batch[field]
-                    for field in list(self.seq_fields) + ["sample_id"]
-                }
-            )
+
+        distr = self(
+            **{
+                field: batch[field if field != "target" else "naive_target"]
+                for field in list(self.seq_fields) + ["sample_id"]
+                if field != "naive_target"
+            }
+        )
+
         val_loss = self.hparams.loss_func(
             pred=distr,
             **{
@@ -531,26 +493,16 @@ class MoiraiFinetune(L.LightningModule):
                     optional_fields=("past_feat_dynamic_real",),
                     imputation_method=DummyValueImputation(value=0.0),
                 )
-                + (
-                    GetSeasonalNaivePrediction(
-                        naive_prediction_field="naive_prediction"
-                    )
-                    if self.apply_seasonal_naive
-                    else Identity()
-                )
+                + GetSeasonalNaivePrediction(naive_prediction_field="naive_prediction")
                 + Patchify(
                     max_patch_size=max(self.module.patch_sizes),
                     fields=("target", "observed_mask"),
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                + (
-                    AddSeasonalNaiveTarget(
-                        max_patch_size=max(self.module.patch_sizes),
-                        naive_target_field="naive_target",
-                        naive_prediction_field="naive_prediction",
-                    )
-                    if self.apply_seasonal_naive
-                    else Identity()
+                + AddSeasonalNaiveTarget(
+                    max_patch_size=max(self.module.patch_sizes),
+                    naive_target_field="naive_target",
+                    naive_prediction_field="naive_prediction",
                 )
                 + AddVariateIndex(
                     fields=("target",),
@@ -615,14 +567,10 @@ class MoiraiFinetune(L.LightningModule):
                     optional_fields=("past_feat_dynamic_real",),
                     feat=True,
                 )
-                + (
-                    FlatPackFields(
-                        output_field="naive_target",
-                        fields=("naive_target",),
-                        feat=True,
-                    )
-                    if self.apply_seasonal_naive
-                    else Identity()
+                + FlatPackFields(
+                    output_field="naive_target",
+                    fields=("naive_target",),
+                    feat=True,
                 )
                 + SequencifyField(field="patch_size", target_field="target")
                 + SelectFields(fields=list(self.seq_fields))
@@ -683,26 +631,16 @@ class MoiraiFinetune(L.LightningModule):
                     optional_fields=("past_feat_dynamic_real",),
                     imputation_method=DummyValueImputation(value=0.0),
                 )
-                + (
-                    GetSeasonalNaivePrediction(
-                        naive_prediction_field="naive_prediction"
-                    )
-                    if self.apply_seasonal_naive
-                    else Identity()
-                )
+                + GetSeasonalNaivePrediction(naive_prediction_field="naive_prediction")
                 + Patchify(
                     max_patch_size=max(self.module.patch_sizes),
                     fields=("target", "observed_mask"),
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                + (
-                    AddSeasonalNaiveTarget(
-                        max_patch_size=max(self.module.patch_sizes),
-                        naive_target_field="naive_target",
-                        naive_prediction_field="naive_prediction",
-                    )
-                    if self.apply_seasonal_naive
-                    else Identity()
+                + AddSeasonalNaiveTarget(
+                    max_patch_size=max(self.module.patch_sizes),
+                    naive_target_field="naive_target",
+                    naive_prediction_field="naive_prediction",
                 )
                 + AddVariateIndex(
                     fields=("target",),
@@ -756,14 +694,10 @@ class MoiraiFinetune(L.LightningModule):
                     optional_fields=("past_feat_dynamic_real",),
                     feat=True,
                 )
-                + (
-                    FlatPackFields(
-                        output_field="naive_target",
-                        fields=("naive_target",),
-                        feat=True,
-                    )
-                    if self.apply_seasonal_naive
-                    else Identity()
+                + FlatPackFields(
+                    output_field="naive_target",
+                    fields=("naive_target",),
+                    feat=True,
                 )
                 + SequencifyField(field="patch_size", target_field="target")
                 + SelectFields(fields=list(self.seq_fields))

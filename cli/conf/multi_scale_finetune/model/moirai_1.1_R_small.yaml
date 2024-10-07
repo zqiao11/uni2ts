@@ -1,7 +1,7 @@
 # load a pretrained checkpoint from huggingface hub
-_target_: uni2ts.model.moirai.MoiraiMultiScaleFinetune
+_target_: uni2ts.model.multi_scale_moirai.MoiraiFinetune
 module:
-  _target_: uni2ts.model.moirai.MoiraiModule.from_pretrained
+  _target_: uni2ts.model.multi_scale_moirai.MoiraiModule.from_pretrained
   pretrained_model_name_or_path: Salesforce/moirai-1.1-R-small
 module_kwargs:
   _target_: builtins.dict
@@ -39,3 +39,4 @@ patch_size: null
 context_length: null
 prediction_length: null
 finetune_pattern: full
+num_new_scales: 1

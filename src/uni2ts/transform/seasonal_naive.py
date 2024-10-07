@@ -12,13 +12,7 @@ from jaxtyping import Bool, Float, Num
 from uni2ts.common.typing import UnivarTimeSeries
 
 from ._base import Transformation
-from ._mixin import (
-    AddNewArrMixin,
-    ApplyFuncMixin,
-    CheckArrNDimMixin,
-    CollectFuncMixin,
-    MapFuncMixin,
-)
+from ._mixin import ApplyFuncMixin, CheckArrNDimMixin, CollectFuncMixin, MapFuncMixin
 
 
 def seasonal_naive_predict(context: np.ndarray, prediction: np.ndarray) -> np.ndarray:
@@ -115,6 +109,9 @@ class AddSeasonalNaiveTarget(Transformation):
     pad_value: int | float = 0
 
     def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        """
+        target: ndarray of shape (feat, num_patch, max_patch_size)
+        """
         target = data_entry["target"]
         patch_size = data_entry["patch_size"]
         num_pred_patches = data_entry["num_pred_patches"]
