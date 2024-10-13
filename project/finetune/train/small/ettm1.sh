@@ -10,7 +10,7 @@ ft_pattern=full
 
 
 ####### ETTm1 ######
-for pl in 192 336 720; do  # 96
+for pl in 96 192 336 720; do
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \

@@ -103,7 +103,7 @@ class RotaryProjection(Projection):
         self._init_freq(max_len=seq_id.max() + 1)
         rot_cos = self.cos[seq_id]
         rot_sin = self.sin[seq_id]
-        return rot_cos * x + rot_sin * self._rotate(x)
+        return rot_cos * x + rot_sin * self._rotate(x)  # QZ: Eq 34 in the paper
 
 
 class LearnedProjection(Projection):
@@ -145,7 +145,7 @@ class QueryKeyProjection(nn.Module):
         kwargs: Optional[dict[str, Any]] = None,
         key_proj_layer: Optional[type[Projection]] = None,
         key_kwargs: Optional[dict[str, Any]] = None,
-        partial_factor: Optional[tuple[float, float]] = None,
+        partial_factor: Optional[tuple[float, float]] = None,  # QZ: Only rotate part of embedding dimension
     ):
         super().__init__()
         if partial_factor is not None:
