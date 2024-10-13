@@ -141,7 +141,7 @@ class TransformerEncoder(nn.Module):
         )
 
         get_self_attn = partial(
-            GroupedQueryAttention,
+            GroupedQueryAttention,   # ToDo: If I change it, can I load MoiraiModule with original ckpt?
             dim=d_model,
             num_heads=num_heads,
             num_groups=num_groups,

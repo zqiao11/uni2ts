@@ -271,9 +271,13 @@ class MoiraiFinetune(L.LightningModule):
             for param in self.parameters():
                 param.requires_grad = False
 
-        # Always learn the scale embedding
+        # # Always learn the scale embedding
+        # for pn, p in self.named_parameters():
+        #     if "new_scale_encoding" in pn:
+        #         p.requires_grad = True
+
         for pn, p in self.named_parameters():
-            if "new_scale_encoding" in pn:
+            if "filmed_generator" in pn:
                 p.requires_grad = True
 
         # Unfreeze the corresponding params
@@ -508,7 +512,7 @@ class MoiraiFinetune(L.LightningModule):
                     variate_id_field="variate_id",
                     expected_ndim=3,
                     max_dim=self.hparams.max_dim,
-                    randomize=True,
+                    randomize=False,
                     collection_type=dict,
                 )
                 + AddTimeIndex(
@@ -634,7 +638,7 @@ class MoiraiFinetune(L.LightningModule):
                     variate_id_field="variate_id",
                     expected_ndim=3,
                     max_dim=self.hparams.max_dim,
-                    randomize=True,
+                    randomize=False,
                     collection_type=dict,
                 )
                 + AddTimeIndex(

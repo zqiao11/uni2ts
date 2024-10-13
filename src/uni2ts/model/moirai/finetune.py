@@ -497,7 +497,7 @@ class MoiraiFinetune(L.LightningModule):
                     variate_id_field="variate_id",
                     expected_ndim=3,
                     max_dim=self.hparams.max_dim,
-                    randomize=True,
+                    randomize=False,
                     collection_type=dict,
                 )
                 + AddTimeIndex(
@@ -624,7 +624,7 @@ class MoiraiFinetune(L.LightningModule):
                     variate_id_field="variate_id",
                     expected_ndim=3,
                     max_dim=self.hparams.max_dim,
-                    randomize=True,
+                    randomize=False,
                     collection_type=dict,
                 )
                 + AddTimeIndex(

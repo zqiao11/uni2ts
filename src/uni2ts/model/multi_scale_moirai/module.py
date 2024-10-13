@@ -101,12 +101,12 @@ class MoiraiModule(
 
         self.mask_encoding = nn.Embedding(num_embeddings=1, embedding_dim=d_model)
 
-        self.new_scale_encoding = nn.ModuleList(
-            [
-                nn.Embedding(num_embeddings=1, embedding_dim=d_model)
-                for _ in range(num_new_scales)
-            ]
-        )
+        # self.new_scale_encoding = nn.ModuleList(
+        #     [
+        #         nn.Embedding(num_embeddings=1, embedding_dim=d_model)
+        #         for _ in range(num_new_scales)
+        #     ]
+        # )
 
         self.scaler = PackedStdScaler() if scaling else PackedNOPScaler()
         self.in_proj = MultiInSizeLinear(
@@ -180,17 +180,17 @@ class MoiraiModule(
         reprs = self.in_proj(scaled_target, patch_size)
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
 
-        # ToDo: Plan 1. Add learnable variate embedding to the tokens of each new scales
-        masked_reprs = self.add_new_scale_embedding(
-            masked_reprs, sample_id=sample_id, variate_id=variate_id
-        )
+        # # ToDo: Plan 1. Add learnable variate embedding to the tokens of each new scales
+        # masked_reprs = self.add_new_scale_embedding(
+        #     masked_reprs, sample_id=sample_id, variate_id=variate_id
+        # )
 
         reprs = self.encoder(
             masked_reprs,
             packed_attention_mask(sample_id),
             time_id=time_id,
             var_id=variate_id,
-        )
+        )  # (bs, seq_len, max_patch)
         distr_param = self.param_proj(reprs, patch_size)
         distr = self.distr_output.distribution(distr_param, loc=loc, scale=scale)
         return distr
