@@ -14,8 +14,8 @@
 #  limitations under the License.
 
 from ._base import Chain, Identity, Transformation
-from .crop import EvalCrop, PatchCrop, PatchCropGivenFixedConfig
-from .feature import AddObservedMask, AddTimeIndex, AddVariateIndex
+from .crop import EvalCrop, PatchCrop, PatchCropGivenFixedConfig, FinetunePatchCrop
+from .feature import AddObservedMask, AddTimeIndex, AddVariateIndex, AddSampleIndex
 from .field import LambdaSetFieldIfNotPresent, RemoveFields, SelectFields, SetValue
 from .imputation import DummyValueImputation, ImputeTimeSeries, LastValueImputation
 from .multi_scale import (
@@ -59,6 +59,7 @@ __all__ = [
     "AddNewScaleSeries",
     "AddNewScaleContextSeries",
     "AddNewFreqScaleSeries",
+    "AddSampleIndex",
     "AddObservedMask",
     "AddTimeIndex",
     "AddVariateIndex",
@@ -101,4 +102,5 @@ __all__ = [
     "GetSeasonalNaivePrediction",
     "AddSeasonalNaiveTarget",
     "SeasonalNaiveEvalCrop",
+    "FinetunePatchCrop"
 ]

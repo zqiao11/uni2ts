@@ -109,10 +109,14 @@ class DataModule(L.LightningDataModule):
 
     @property
     def train_num_batches_per_epoch(self) -> int:
-        return (
-            self.cfg.train_dataloader.num_batches_per_epoch
-            * self.trainer.accumulate_grad_batches
-        )
+        if self.cfg.train_dataloader.num_batches_per_epoch is not None:
+            return (
+                self.cfg.train_dataloader.num_batches_per_epoch
+                * self.trainer.accumulate_grad_batches
+            )
+
+        else:
+            return None
 
 
 @hydra.main(version_base="1.3", config_name="default.yaml")
@@ -123,6 +127,9 @@ def main(cfg: DictConfig):
         torch.backends.cudnn.allow_tf32 = True
 
     model: L.LightningModule = instantiate(cfg.model, _convert_="all")
+
+    if 'collate_fn' not in cfg.train_dataloader:
+        model.seq_fields = model.seq_fields + ("sample_id",)
 
     if cfg.compile:
         model.module.compile(mode=cfg.compile)
@@ -143,6 +150,9 @@ def main(cfg: DictConfig):
         else None
     )
     L.seed_everything(cfg.seed + trainer.logger.version, workers=True)
+
+    print("Number of windows in train: ", train_dataset.dataset_weight * train_dataset.num_ts)
+
 
     # Validate before training, check the performance of original pretrained model.
     trainer.validate(model, datamodule=DataModule(cfg, train_dataset, val_dataset))

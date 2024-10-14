@@ -222,3 +222,43 @@ class EvalCrop(MapFuncMixin, Transformation):
             assert 0 >= b > a >= -time
 
         return a, b
+
+
+
+@dataclass
+class FinetunePatchCrop(MapFuncMixin, Transformation):
+    """
+    """
+
+    distance: int
+    prediction_length: int
+    context_length: int
+    fields: tuple[str, ...] = ("target",)
+    optional_fields: tuple[str, ...] = ("past_feat_dynamic_real",)
+
+    def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        a, b = self._get_boundaries(data_entry)
+        self.map_func(
+            partial(self._crop, a=a, b=b),  # noqa
+            data_entry,
+            self.fields,
+            optional_fields=self.optional_fields,
+        )
+        return data_entry
+
+    @staticmethod
+    def _crop(data_entry: dict[str, Any], field: str, a: int, b: int) -> Sequence:
+        return [ts[a:b] for ts in data_entry[field]]
+
+    def _get_boundaries(self, data_entry: dict[str, Any]) -> tuple[int, int]:
+        field: list[UnivarTimeSeries] = data_entry[self.fields[0]]
+        time = field[0].shape[0]  # num of time steps of one series
+        window = data_entry["window"]
+        fcst_start = self.context_length + window * self.distance
+        a = fcst_start - self.context_length
+        b = fcst_start + self.prediction_length
+
+        assert time >= b > a >= 0
+
+        return a, b
+
