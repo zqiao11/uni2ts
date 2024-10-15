@@ -42,6 +42,7 @@ from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
 from uni2ts.transform import (
     AddObservedMask,
+    AddSampleIndex,
     AddTimeIndex,
     AddVariateIndex,
     DefaultPatchSizeConstraints,
@@ -50,6 +51,7 @@ from uni2ts.transform import (
     EvalMaskedPrediction,
     EvalPad,
     ExtendMask,
+    FinetunePatchCrop,
     FixedPatchSizeConstraints,
     FlatPackCollection,
     FlatPackFields,
@@ -66,8 +68,6 @@ from uni2ts.transform import (
     SelectFields,
     SequencifyField,
     Transformation,
-    FinetunePatchCrop,
-    AddSampleIndex
 )
 
 from .module import MoiraiModule
@@ -292,7 +292,7 @@ class MoiraiFinetune(L.LightningModule):
                 if "in_proj" in pn:
                     p.requires_grad = True
 
-        if "norm" in self.finetune_pattern:  #
+        if "norm" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "norm1" in pn or "norm2" in pn:
                     p.requires_grad = True
@@ -409,17 +409,16 @@ class MoiraiFinetune(L.LightningModule):
             eps=1e-6,
         )
         scheduler = get_scheduler(
-            SchedulerType.REDUCE_ON_PLATEAU,
+            SchedulerType.CONSTANT,  # Use constant lr scheduler
             optimizer,
             num_warmup_steps=self.hparams.num_warmup_steps,
             num_training_steps=self.hparams.num_training_steps,
-            # scheduler_specific_kwargs={'monitor': "val/{self.hparams.loss_func.__class__.__name__}"}
         )
         return {
             "optimizer": optimizer,
             "lr_scheduler": {
                 "scheduler": scheduler,
-                "monitor": "lr-AdamW/pg1",
+                "monitor": "train_loss",
                 "interval": "step",
             },
         }
@@ -503,9 +502,9 @@ class MoiraiFinetune(L.LightningModule):
                 + AddSampleIndex(
                     fields=("target",),
                     optional_fields=("past_feat_dynamic_real",),
-                    sample_id_field = "sample_id",
-                    expected_ndim = 3,
-                    collection_type = dict,
+                    sample_id_field="sample_id",
+                    expected_ndim=3,
+                    collection_type=dict,
                 )
                 + EvalMaskedPrediction(
                     mask_length=math.ceil(prediction_length / patch_size),
@@ -530,8 +529,8 @@ class MoiraiFinetune(L.LightningModule):
                     feat=False,
                 )
                 + FlatPackCollection(
-                        field="sample_id",
-                        feat=False,
+                    field="sample_id",
+                    feat=False,
                 )
                 + FlatPackCollection(
                     field="prediction_mask",

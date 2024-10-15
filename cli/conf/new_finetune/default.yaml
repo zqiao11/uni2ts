@@ -36,7 +36,7 @@ trainer:
     - _target_: uni2ts.callbacks.earlystop.WarmupEarlyStopping  # lightning.pytorch.callbacks.EarlyStopping
       monitor: val/PackedNLLLoss
       min_delta: 0.0
-      patience: 30
+      patience: 3  # Set to a small value as now each epoch has many batches.
       mode: min
       strict: false
       verbose: true
@@ -48,9 +48,9 @@ trainer:
   gradient_clip_algorithm: norm
 train_dataloader:
   _target_: uni2ts.data.loader.DataLoader
-  batch_size: 64
+  batch_size: 512 # Can use a large batch size after disabling sequence packing.
   batch_size_factor: 2.0
-  cycle: false # true
+  cycle: false  # Set it as false to loop over all batches per epoch
   num_batches_per_epoch: null
   shuffle: true
   num_workers: 11

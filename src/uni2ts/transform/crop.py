@@ -224,11 +224,9 @@ class EvalCrop(MapFuncMixin, Transformation):
         return a, b
 
 
-
 @dataclass
 class FinetunePatchCrop(MapFuncMixin, Transformation):
-    """
-    """
+    """ """
 
     distance: int
     prediction_length: int
@@ -261,4 +259,3 @@ class FinetunePatchCrop(MapFuncMixin, Transformation):
         assert time >= b > a >= 0
 
         return a, b
-

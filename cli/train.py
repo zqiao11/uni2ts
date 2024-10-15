@@ -128,7 +128,7 @@ def main(cfg: DictConfig):
 
     model: L.LightningModule = instantiate(cfg.model, _convert_="all")
 
-    if 'collate_fn' not in cfg.train_dataloader:
+    if "collate_fn" not in cfg.train_dataloader:
         model.seq_fields = model.seq_fields + ("sample_id",)
 
     if cfg.compile:
@@ -151,8 +151,26 @@ def main(cfg: DictConfig):
     )
     L.seed_everything(cfg.seed + trainer.logger.version, workers=True)
 
-    print("Number of windows in train: ", train_dataset.dataset_weight * train_dataset.num_ts)
+    print(
+        "Number of windows in train: ",
+        train_dataset.dataset_weight * train_dataset.num_ts,
+    )
+    print("Batch size for train: ", cfg.train_dataloader.batch_size)
+    print(
+        "Number of batches in a epoch: ",
+        train_dataset.dataset_weight
+        * train_dataset.num_ts
+        // cfg.train_dataloader.batch_size,
+    )
 
+    print("Number of windows in val: ", val_dataset.dataset_weight * val_dataset.num_ts)
+    print("Batch size for val: ", cfg.val_dataloader.batch_size)
+    print(
+        "Number of batches in a epoch: ",
+        val_dataset.dataset_weight
+        * val_dataset.num_ts
+        // cfg.val_dataloader.batch_size,
+    )
 
     # Validate before training, check the performance of original pretrained model.
     trainer.validate(model, datamodule=DataModule(cfg, train_dataset, val_dataset))

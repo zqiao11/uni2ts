@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: outputs/eval/${hydra:runtime.choices.model}/${exp_name}/${data.dataset_name}/${data.mode}/cl${model.context_length}_pl${data.prediction_length}
+    dir: outputs/new_eval/${hydra:runtime.choices.model}/${exp_name}/${data.dataset_name}/${data.mode}/cl${model.context_length}_pl${data.prediction_length}
 defaults:
   - model: ???
   - data: ???

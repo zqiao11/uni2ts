@@ -26,7 +26,12 @@ from torch.utils.data import Dataset
 
 from uni2ts.common.env import env
 from uni2ts.common.typing import GenFunc
-from uni2ts.data.dataset import EvalDataset, SampleTimeSeriesType, TimeSeriesDataset, FinetuneDataset
+from uni2ts.data.dataset import (
+    EvalDataset,
+    FinetuneDataset,
+    SampleTimeSeriesType,
+    TimeSeriesDataset,
+)
 from uni2ts.data.indexer import HuggingFaceDatasetIndexer
 from uni2ts.transform import Transformation
 
@@ -334,25 +339,6 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
         return (data - self.mean) / self.std
 
 
-def generate_finetune_builder(
-    dataset: str,
-    train_length: int,
-    prediction_length: int,
-    context_length: int,
-    patch_size: int,
-    storage_path: Path = env.CUSTOM_DATA_PATH,
-) -> SimpleFinetuneDatasetBuilder:
-    return SimpleFinetuneDatasetBuilder(
-            dataset=dataset,
-            windows=train_length - context_length - prediction_length + 1,
-            distance=1,
-            prediction_length=prediction_length,
-            context_length=context_length,
-            patch_size=patch_size,
-            storage_path=storage_path,
-        )
-
-
 @dataclass
 class SimpleEvalDatasetBuilder(DatasetBuilder):
     dataset: str
@@ -419,6 +405,81 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
         )
 
 
+def generate_finetune_builder(
+    dataset: str,
+    train_length: int,
+    prediction_length: int,
+    context_length: int,
+    patch_size: int,
+    storage_path: Path = env.CUSTOM_DATA_PATH,
+) -> SimpleFinetuneDatasetBuilder:
+    """
+    Set distance=1 for training data. Same as standard LSF setting.
+    """
+    return SimpleFinetuneDatasetBuilder(
+        dataset=dataset,
+        windows=train_length - context_length - prediction_length + 1,
+        distance=1,
+        prediction_length=prediction_length,
+        context_length=context_length,
+        patch_size=patch_size,
+        storage_path=storage_path,
+    )
+
+
+def generate_eval_builder(
+    dataset: str,
+    offset: int,
+    eval_length: int,
+    prediction_length: int,
+    context_length: int,
+    patch_size: int,
+    storage_path: Path = env.CUSTOM_DATA_PATH,
+) -> SimpleEvalDatasetBuilder:
+    """
+    Set distance according to dataset. Decrease the number of validation samples to reduce computational cost.
+    """
+    distances = {
+        "ETTh1_eval": 13,  # 13h
+        "ETTh2_eval": 13,
+        "ETTm1_eval": 25,  # 6h 15min
+        "ETTm2_eval": 25,
+        "weather_eval": 37,  # 6h 10 min
+        "electricity_eval": 49,  # 2d 1h
+    }
+    if dataset in distances:
+        distance = distances[dataset]
+        windows = (eval_length - prediction_length) // distance + 1
+    else:
+        distance = prediction_length
+        windows = eval_length // prediction_length
+
+    # base = 8  # base can change for different datasets
+    # overlap_ratio = {
+    #     96: base,
+    #     192: 2*base,
+    #     336: 4*base,
+    #     720: 8*base,
+    # }
+    # if prediction_length in overlap_ratio:
+    #     distance = prediction_length // overlap_ratio[prediction_length]
+    #     windows = (eval_length - prediction_length) // distance + 1
+    # else:
+    #     distance = prediction_length
+    #     windows = eval_length // prediction_length
+
+    return SimpleEvalDatasetBuilder(
+        dataset=dataset,
+        offset=offset,
+        windows=windows,
+        distance=distance,
+        prediction_length=prediction_length,
+        context_length=context_length,
+        patch_size=patch_size,
+        storage_path=storage_path,
+    )
+
+
 def generate_eval_builders(
     dataset: str,
     offset: int,
@@ -434,8 +495,6 @@ def generate_eval_builders(
             offset=offset,
             windows=eval_length // pred,
             distance=pred,
-            # windows=eval_length - pred + 1,
-            # distance=1,
             prediction_length=pred,
             context_length=ctx,
             patch_size=psz,

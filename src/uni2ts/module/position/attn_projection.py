@@ -145,7 +145,9 @@ class QueryKeyProjection(nn.Module):
         kwargs: Optional[dict[str, Any]] = None,
         key_proj_layer: Optional[type[Projection]] = None,
         key_kwargs: Optional[dict[str, Any]] = None,
-        partial_factor: Optional[tuple[float, float]] = None,  # QZ: Only rotate part of embedding dimension
+        partial_factor: Optional[
+            tuple[float, float]
+        ] = None,  # QZ: Only rotate part of embedding dimension
     ):
         super().__init__()
         if partial_factor is not None:

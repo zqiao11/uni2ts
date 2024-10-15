@@ -212,9 +212,7 @@ class EvalDataset(TimeSeriesDataset):
 
 
 class FinetuneDataset(TimeSeriesDataset):
-    """
-
-    """
+    """ """
 
     def __init__(
         self,
