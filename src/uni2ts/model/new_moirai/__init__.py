@@ -16,11 +16,9 @@
 from .finetune import MoiraiFinetune
 from .forecast import MoiraiForecast
 from .module import MoiraiModule
-from .pretrain import MoiraiPretrain
 
 __all__ = [
     "MoiraiFinetune",
     "MoiraiForecast",
     "MoiraiModule",
-    "MoiraiPretrain",
 ]
