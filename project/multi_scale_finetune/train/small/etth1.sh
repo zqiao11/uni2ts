@@ -8,20 +8,25 @@ exp_name=lsf
 cl=3000
 ft_pattern=full
 
-### ETTh1 ######
-for pl in 96 192 336 720; do
+data=etth1
+ps=64
+
+for pl in 96 ; do  # 192 336 720
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \
   run_name=cl${cl}_pl${pl} \
   model=$model \
-  model.patch_size=64 \
+  model.patch_size=${ps} \
   model.context_length=$cl \
   model.prediction_length=$pl \
   model.finetune_pattern=$ft_pattern \
-  data=etth1 \
-  val_data=etth1 \
-  val_data._args_.patch_sizes=[64] \
-  val_data._args_.context_lengths=[$cl] \
-  val_data._args_.prediction_lengths=[$pl]
+  data=${data} \
+  data.patch_size=${ps} \
+  data.context_length=$cl \
+  data.prediction_length=$pl \
+  val_data=${data} \
+  val_data.patch_size=${ps} \
+  val_data.context_length=$cl \
+  val_data.prediction_length=$pl
 done
