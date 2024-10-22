@@ -96,8 +96,12 @@ class MoiraiForecast(L.LightningModule):
         self.replace_forecast_head()
 
     def replace_forecast_head(self):
-        seq_len = math.ceil(self.hparams.context_length / self.hparams.patch_size) + math.ceil(self.hparams.prediction_length / self.hparams.patch_size)
-        self.module.replace_forecast_head(seq_len=seq_len, pred_len=self.hparams.prediction_length)
+        seq_len = math.ceil(
+            self.hparams.context_length / self.hparams.patch_size
+        ) + math.ceil(self.hparams.prediction_length / self.hparams.patch_size)
+        self.module.replace_forecast_head(
+            seq_len=seq_len, pred_len=self.hparams.prediction_length
+        )
 
     def create_predictor(
         self,

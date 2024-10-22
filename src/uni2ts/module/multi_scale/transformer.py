@@ -22,9 +22,9 @@ import torch.nn.functional as F
 from jaxtyping import Bool, Float, Int
 from torch import nn
 
-from .attention import GroupedQueryAttention
 from ..ffn import FeedForward, GatedLinearUnitFeedForward
 from ..position import AttentionBias, QueryKeyProjection
+from .attention import GroupedQueryAttention
 
 
 class TransformerEncoderLayer(nn.Module):

@@ -141,8 +141,12 @@ class MoiraiFinetune(L.LightningModule):
         self.criterion = torch.nn.MSELoss()
 
     def replace_forecast_head(self):
-        seq_len = math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
-        self.module.replace_forecast_head(seq_len=seq_len, pred_len=self.prediction_length)
+        seq_len = math.ceil(self.context_length / self.patch_size) + math.ceil(
+            self.prediction_length / self.patch_size
+        )
+        self.module.replace_forecast_head(
+            seq_len=seq_len, pred_len=self.prediction_length
+        )
 
     def forward(
         self,
@@ -469,7 +473,12 @@ class MoiraiFinetune(L.LightningModule):
                 + EvalMaskedPrediction(
                     mask_length=math.ceil(prediction_length / patch_size),
                     target_field="target",
-                    truncate_fields=("variate_id", "time_id", "observed_mask", "sample_id"),
+                    truncate_fields=(
+                        "variate_id",
+                        "time_id",
+                        "observed_mask",
+                        "sample_id",
+                    ),
                     optional_truncate_fields=("past_feat_dynamic_real",),
                     prediction_mask_field="prediction_mask",
                     expected_ndim=3,
@@ -596,7 +605,12 @@ class MoiraiFinetune(L.LightningModule):
                 + EvalMaskedPrediction(
                     mask_length=math.ceil(prediction_length / patch_size),
                     target_field="target",
-                    truncate_fields=("variate_id", "time_id", "observed_mask", "sample_id"),
+                    truncate_fields=(
+                        "variate_id",
+                        "time_id",
+                        "observed_mask",
+                        "sample_id",
+                    ),
                     optional_truncate_fields=("past_feat_dynamic_real",),
                     prediction_mask_field="prediction_mask",
                     expected_ndim=3,

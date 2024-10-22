@@ -113,7 +113,7 @@ class MoiraiFinetune(L.LightningModule):
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
         num_new_scales: int = 1,
-        ds_factor: int = 2
+        ds_factor: int = 2,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
@@ -509,7 +509,8 @@ class MoiraiFinetune(L.LightningModule):
                 )
                 + AddSampleIndex(
                     fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",) + self.new_scales_target_fields,
+                    optional_fields=("past_feat_dynamic_real",)
+                    + self.new_scales_target_fields,
                     sample_id_field="sample_id",
                     expected_ndim=3,
                     collection_type=dict,

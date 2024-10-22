@@ -26,6 +26,9 @@ from torch.utils.data import Dataset
 
 from uni2ts.common.env import env
 from uni2ts.common.typing import GenFunc
+
+# from ._base import DatasetBuilder
+from uni2ts.data.builder._base import DatasetBuilder
 from uni2ts.data.dataset import (
     EvalDataset,
     FinetuneDataset,
@@ -35,8 +38,6 @@ from uni2ts.data.dataset import (
 from uni2ts.data.indexer import HuggingFaceDatasetIndexer
 from uni2ts.transform import Transformation
 
-# from ._base import DatasetBuilder
-from uni2ts.data.builder._base import DatasetBuilder
 
 def _from_long_dataframe(
     df: pd.DataFrame,
@@ -212,8 +213,15 @@ class SimpleDatasetBuilder(DatasetBuilder):
         df = pd.read_csv(file, index_col=0, parse_dates=True)
 
         if normalize:
-            end = offset if offset is not None else len(
-                df[df.index <= date_offset].index) if date_offset is not None else len(df.index)
+            end = (
+                offset
+                if offset is not None
+                else (
+                    len(df[df.index <= date_offset].index)
+                    if date_offset is not None
+                    else len(df.index)
+                )
+            )
             df = self.scale(df, 0, end)
 
         if dataset_type == "long":
@@ -293,8 +301,15 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
         df = pd.read_csv(file, index_col=0, parse_dates=True)
 
         if normalize:
-            end = offset if offset is not None else len(
-                df[df.index <= date_offset].index) if date_offset is not None else len(df.index)
+            end = (
+                offset
+                if offset is not None
+                else (
+                    len(df[df.index <= date_offset].index)
+                    if date_offset is not None
+                    else len(df.index)
+                )
+            )
             df = self.scale(df, 0, end)
 
         if dataset_type == "long":

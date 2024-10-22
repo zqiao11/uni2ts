@@ -1,12 +1,12 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.1_R_small
 cp=conf/multi_scale/finetune
 exp_name=lsf
 cl=3000
-ft_pattern=full
+ft_pattern=full_0
 
 data=ettm2
 ps=64

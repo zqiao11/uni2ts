@@ -27,6 +27,7 @@ from torch.utils._pytree import tree_map
 
 from uni2ts.common.torch_util import mask_fill, packed_attention_mask
 from uni2ts.distribution import DistributionOutput
+from uni2ts.module.multi_scale.transformer import TransformerEncoder
 from uni2ts.module.norm import RMSNorm
 from uni2ts.module.packed_scaler import PackedNOPScaler, PackedStdScaler
 from uni2ts.module.position import (
@@ -34,7 +35,6 @@ from uni2ts.module.position import (
     QueryKeyProjection,
     RotaryProjection,
 )
-from uni2ts.module.multi_scale.transformer import TransformerEncoder
 from uni2ts.module.ts_embed import MultiInSizeLinear
 
 
@@ -124,7 +124,9 @@ class MoiraiModule(
             activation=F.silu,
             use_glu=True,
             use_qk_norm=True,
-            var_attn_bias_layer=partial(BinaryAttentionBias),  # ToDo: 这个var attn bias可以改
+            var_attn_bias_layer=partial(
+                BinaryAttentionBias
+            ),  # ToDo: 这个var attn bias可以改
             time_qk_proj_layer=partial(
                 QueryKeyProjection,
                 proj_layer=RotaryProjection,

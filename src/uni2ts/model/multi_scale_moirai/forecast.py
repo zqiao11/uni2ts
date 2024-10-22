@@ -97,7 +97,7 @@ class MoiraiForecast(L.LightningModule):
         num_samples: int = 100,
         pretrained_checkpoint_path: str = None,
         num_new_scales: int = 1,
-        ds_factor: int = 2
+        ds_factor: int = 2,
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -766,7 +766,9 @@ class MoiraiForecast(L.LightningModule):
                 # Downsample
                 past_target = self._downsample(past_target, left=True)
                 past_observed_target = self._downsample(past_observed_target, left=True)
-                past_is_pad = self._downsample(past_is_pad.bool(), ds_factor=self.ds_factor,  left=False).int()
+                past_is_pad = self._downsample(
+                    past_is_pad.bool(), ds_factor=self.ds_factor, left=False
+                ).int()
                 context_length = math.ceil(context_length / 2)
 
                 target.extend(
@@ -882,7 +884,9 @@ class MoiraiForecast(L.LightningModule):
             prediction_mask,
         )
 
-    def _downsample(self, arr: torch.Tensor, ds_factor: int = 2, left: bool = True) -> torch.Tensor:
+    def _downsample(
+        self, arr: torch.Tensor, ds_factor: int = 2, left: bool = True
+    ) -> torch.Tensor:
         # Check if the input tensor is 2D (bs, time) or 3D (*bs, time, feature)
         if arr.ndim == 2:
             # 2D case: arr is (bs, time) without feature dimension

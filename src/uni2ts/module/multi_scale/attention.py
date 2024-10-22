@@ -97,31 +97,30 @@ class GroupedQueryAttention(nn.Module):
         self.attn_dropout_p = attn_dropout_p
         self.out_proj = nn.Linear(dim, dim, bias=bias)
 
-
         # Todo: Create these mudules based on num_new_scales & ds_factor & seq_len
-        base = 24  # 24 for ETTH1, 12 for ETTm1
-        self.query_filmed_generator = nn.ModuleList(
-            [
-                nn.Linear(in_features=dim, out_features=2 * base),
-                nn.Linear(in_features=dim, out_features=2 * base // 2),
-                nn.Linear(in_features=dim, out_features=2 * base // 4),
-            ]
-        )
-
-        self.key_filmed_generator = nn.ModuleList(
-            [
-                nn.Linear(in_features=dim, out_features=2 * base),
-                nn.Linear(in_features=dim, out_features=2 * base // 2),
-                nn.Linear(in_features=dim, out_features=2 * base // 4),
-            ]
-        )
-
-        # self.value_filmed_generator = nn.ModuleList(
+        # base = 24  # 24 for ETTH1, 12 for ETTm1
+        # self.query_filmed_generator = nn.ModuleList(
         #     [
-        #         nn.Linear(in_features=dim, out_features=2 * 12),  # each scale's length
-        #         nn.Linear(in_features=dim, out_features=2 * 6)
+        #         nn.Linear(in_features=dim, out_features=2 * base),
+        #         nn.Linear(in_features=dim, out_features=2 * base // 2),
+        #         nn.Linear(in_features=dim, out_features=2 * base // 4),
         #     ]
         # )
+        #
+        # self.key_filmed_generator = nn.ModuleList(
+        #     [
+        #         nn.Linear(in_features=dim, out_features=2 * base),
+        #         nn.Linear(in_features=dim, out_features=2 * base // 2),
+        #         nn.Linear(in_features=dim, out_features=2 * base // 4),
+        #     ]
+        # )
+        #
+        # # self.value_filmed_generator = nn.ModuleList(
+        # #     [
+        # #         nn.Linear(in_features=dim, out_features=2 * 12),  # each scale's length
+        # #         nn.Linear(in_features=dim, out_features=2 * 6)
+        # #     ]
+        # # )
 
     def _get_var_id(
         self,
@@ -291,32 +290,29 @@ class GroupedQueryAttention(nn.Module):
         value = self.v_proj(value)
 
         # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
-        # var_id0 = query_var_id[0].to('cpu').numpy()
-        # attn_mask0 = attn_mask[0].to('cpu').numpy()
-
-        index_by_variate = self.get_token_index_by_variate(query_var_id)
-
-        for scale in range(3):  # ToDO: number_of scales:
-            assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
-            index = index_by_variate[scale+1]
-            query_scale = query[..., index, :]
-            query_film_out = self.query_filmed_generator[scale](torch.mean(query_scale, dim=1))
-            query_weight, query_bias = query_film_out[:, :int(query_film_out.size(-1) / 2)], query_film_out[:, int(query_film_out.size(-1) / 2):]
-            query[..., index, :] = query_weight.unsqueeze(-1) * query_scale + query_bias.unsqueeze(-1)
-
-            key_scale = key[..., index, :]
-            key_film_out = self.key_filmed_generator[scale](torch.mean(key_scale, dim=1))
-            key_weight, key_bias = key_film_out[:, :int(key_film_out.size(-1) / 2)], key_film_out[:,
-                                                                                             int(key_film_out.size(
-                                                                                                 -1) / 2):]
-            key[..., index, :] = key_weight.unsqueeze(-1) * key_scale + key_bias.unsqueeze(-1)
-
-            # value_i = value[..., index, :]
-            # value_film_out = self.value_filmed_generator[scale](torch.mean(value_i, dim=1))
-            # value_weight, value_bias = value_film_out[:, :int(value_film_out.size(-1) / 2)], value_film_out[:,
-            #                                                                                  int(value_film_out.size(
-            #                                                                                      -1) / 2):]
-            # value[..., index, :] = value_weight.unsqueeze(-1) * value_i + value_bias.unsqueeze(-1)
+        # index_by_variate = self.get_token_index_by_variate(query_var_id)
+        #
+        # for scale in range(3):  # ToDO: number_of scales:
+        #     assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
+        #     index = index_by_variate[scale+1]
+        #     query_scale = query[..., index, :]
+        #     query_film_out = self.query_filmed_generator[scale](torch.mean(query_scale, dim=1))
+        #     query_weight, query_bias = query_film_out[:, :int(query_film_out.size(-1) / 2)], query_film_out[:, int(query_film_out.size(-1) / 2):]
+        #     query[..., index, :] = query_weight.unsqueeze(-1) * query_scale + query_bias.unsqueeze(-1)
+        #
+        #     key_scale = key[..., index, :]
+        #     key_film_out = self.key_filmed_generator[scale](torch.mean(key_scale, dim=1))
+        #     key_weight, key_bias = key_film_out[:, :int(key_film_out.size(-1) / 2)], key_film_out[:,
+        #                                                                                      int(key_film_out.size(
+        #                                                                                          -1) / 2):]
+        #     key[..., index, :] = key_weight.unsqueeze(-1) * key_scale + key_bias.unsqueeze(-1)
+        #
+        #     # value_i = value[..., index, :]
+        #     # value_film_out = self.value_filmed_generator[scale](torch.mean(value_i, dim=1))
+        #     # value_weight, value_bias = value_film_out[:, :int(value_film_out.size(-1) / 2)], value_film_out[:,
+        #     #                                                                                  int(value_film_out.size(
+        #     #                                                                                      -1) / 2):]
+        #     # value[..., index, :] = value_weight.unsqueeze(-1) * value_i + value_bias.unsqueeze(-1)
 
         query = self.q_norm(
             rearrange(

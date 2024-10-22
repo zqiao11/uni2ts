@@ -505,7 +505,12 @@ class MoiraiFinetune(L.LightningModule):
                 + EvalMaskedPrediction(
                     mask_length=math.ceil(prediction_length / patch_size),
                     target_field="target",
-                    truncate_fields=("variate_id", "time_id", "observed_mask", "sample_id"),
+                    truncate_fields=(
+                        "variate_id",
+                        "time_id",
+                        "observed_mask",
+                        "sample_id",
+                    ),
                     optional_truncate_fields=("past_feat_dynamic_real",),
                     prediction_mask_field="prediction_mask",
                     expected_ndim=3,
@@ -632,7 +637,12 @@ class MoiraiFinetune(L.LightningModule):
                 + EvalMaskedPrediction(
                     mask_length=math.ceil(prediction_length / patch_size),
                     target_field="target",
-                    truncate_fields=("variate_id", "time_id", "observed_mask", "sample_id"),
+                    truncate_fields=(
+                        "variate_id",
+                        "time_id",
+                        "observed_mask",
+                        "sample_id",
+                    ),
                     optional_truncate_fields=("past_feat_dynamic_real",),
                     prediction_mask_field="prediction_mask",
                     expected_ndim=3,
