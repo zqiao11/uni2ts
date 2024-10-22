@@ -242,6 +242,13 @@ class FinetunePatchCrop(MapFuncMixin, Transformation):
             self.fields,
             optional_fields=self.optional_fields,
         )
+
+        data_entry["context_length"] = self.context_length
+        data_entry["prediction_length"] = self.prediction_length
+        data_entry["num_pred_patches"] = math.ceil(
+            self.prediction_length / data_entry["patch_size"]
+        )
+
         return data_entry
 
     @staticmethod

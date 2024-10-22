@@ -50,7 +50,7 @@ def _load_metr_la(dataset_name, prediction_length: Optional[int] = None):
 def _load_walmart(dataset_name: str, prediction_length: Optional[int] = None):
     df = pd.read_csv(
         os.path.join(
-            env.LSF_PATH, "walmart-recruiting-store-sales-forecasting/train.csv"
+            env.LSF_PATH, "walmart-recruiting-store-sales-forecasting/finetune.csv"
         )
     )
 

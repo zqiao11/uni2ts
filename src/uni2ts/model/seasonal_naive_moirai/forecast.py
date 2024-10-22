@@ -36,7 +36,6 @@ from jaxtyping import Bool, Float, Int
 from torch.distributions import Distribution
 
 from uni2ts.common.torch_util import safe_div
-from uni2ts.distribution import StudentTOutput
 from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
 
 from .module import MoiraiModule
@@ -408,7 +407,6 @@ class MoiraiForecast(L.LightningModule):
                 self.hparams.patch_size, preds, past_target.shape[-1]
             )
 
-    # ToDo: Need to revise _val_loss in the future.
     def _val_loss(
         self,
         patch_size: int,
@@ -607,18 +605,8 @@ class MoiraiForecast(L.LightningModule):
             patch_size, past_observed_target
         )
 
-        if (
-            future_target is None
-        ):  # QZ: Revise here to change future_target as seasonal naive prediction
-            # future_target = torch.zeros(
-            #     batch_shape
-            #     + (
-            #         self.hparams.prediction_length,
-            #         past_target.shape[-1],
-            #     ),
-            #     dtype=past_target.dtype,
-            #     device=device,
-            # )
+        # QZ: Revise here to change future_target as seasonal naive prediction
+        if future_target is None:
             future_target = seasonal_naive_predict_torch(
                 past_target, self.hparams.prediction_length
             )
@@ -645,6 +633,9 @@ class MoiraiForecast(L.LightningModule):
                 ),
             ]
         )
+
+        target0 = target[1][0].cpu().numpy()
+
         if future_observed_target is None:
             future_observed_target = torch.ones(
                 batch_shape
@@ -679,6 +670,9 @@ class MoiraiForecast(L.LightningModule):
                 ),
             ]
         )
+
+        observed_mask0 = observed_mask[1][0].cpu().numpy()
+
         if future_is_pad is None:
             future_is_pad = torch.zeros(
                 batch_shape + (self.hparams.prediction_length,),

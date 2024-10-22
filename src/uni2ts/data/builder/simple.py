@@ -35,8 +35,8 @@ from uni2ts.data.dataset import (
 from uni2ts.data.indexer import HuggingFaceDatasetIndexer
 from uni2ts.transform import Transformation
 
-from ._base import DatasetBuilder
-
+# from ._base import DatasetBuilder
+from uni2ts.data.builder._base import DatasetBuilder
 
 def _from_long_dataframe(
     df: pd.DataFrame,
@@ -212,7 +212,9 @@ class SimpleDatasetBuilder(DatasetBuilder):
         df = pd.read_csv(file, index_col=0, parse_dates=True)
 
         if normalize:
-            df = self.scale(df, 0, len(df.index))
+            end = offset if offset is not None else len(
+                df[df.index <= date_offset].index) if date_offset is not None else len(df.index)
+            df = self.scale(df, 0, end)
 
         if dataset_type == "long":
             _from_dataframe = _from_long_dataframe
@@ -253,7 +255,7 @@ class SimpleDatasetBuilder(DatasetBuilder):
         train = data[start:end]
         self.mean = train.mean(axis=0)
         self.std = train.std(axis=0)
-        return (data - self.mean) / self.std
+        return (data - self.mean) / (self.std + 1e-10)
 
 
 @dataclass
@@ -291,7 +293,9 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
         df = pd.read_csv(file, index_col=0, parse_dates=True)
 
         if normalize:
-            df = self.scale(df, 0, len(df.index))
+            end = offset if offset is not None else len(
+                df[df.index <= date_offset].index) if date_offset is not None else len(df.index)
+            df = self.scale(df, 0, end)
 
         if dataset_type == "long":
             _from_dataframe = _from_long_dataframe
@@ -336,7 +340,7 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
         train = data[start:end]
         self.mean = train.mean(axis=0)
         self.std = train.std(axis=0)
-        return (data - self.mean) / self.std
+        return (data - self.mean) / (self.std + 1e-10)
 
 
 @dataclass
@@ -364,7 +368,7 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
         df = pd.read_csv(file, index_col=0, parse_dates=True)
 
         if mean is not None and std is not None:  # Qz: Normalize data like LSF
-            df = (df - mean) / std
+            df = (df - mean) / (std + 1e-10)
 
         if dataset_type == "long":
             _from_dataframe = _from_long_dataframe
@@ -439,6 +443,16 @@ def generate_eval_builder(
     """
     Set distance according to dataset. Decrease the number of validation samples to reduce computational cost.
     """
+
+    # distances = {
+    #     "ETTh1_eval": 1,  # 13h
+    #     "ETTh2_eval": 1,
+    #     "ETTm1_eval": 1,  # 6h 15min
+    #     "ETTm2_eval": 1,
+    #     "weather_eval": 1,  # 6h 10 min
+    #     "electricity_eval": 1,  # 2d 1h
+    # }
+
     distances = {
         "ETTh1_eval": 13,  # 13h
         "ETTh2_eval": 13,

@@ -22,6 +22,7 @@ class AddNewScaleContextSeries(CheckArrNDimMixin, Transformation):
     """
 
     target_field: str
+    ds_factor: str
     num_new_scales_fields: tuple[str, ...]
     expected_ndim: int = 2
 
@@ -57,7 +58,7 @@ class AddNewScaleContextSeries(CheckArrNDimMixin, Transformation):
 
         self.check_ndim(field, arr, self.expected_ndim)
         dim, time = arr.shape[:2]
-        ds_factor = 2
+        ds_factor = self.ds_factor
 
         if len(self.new_context_length_list) == 0:
             context_length = data_entry["context_length"]
@@ -382,7 +383,6 @@ class MultiScaleMaskedPredictionGivenFixedConfig(CheckArrNDimMixin, Transformati
 
             if field == "target":
                 mask_length = data_entry["num_pred_patches"]
-                data_entry["prediction_length"]
             else:
                 if "prediction_length_new_scales" in data_entry:
                     mask_length = math.ceil(

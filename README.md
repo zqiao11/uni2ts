@@ -88,7 +88,7 @@ df = pd.read_csv(url, index_col=0, parse_dates=True)
 # Convert into GluonTS dataset
 ds = PandasDataset(dict(df))
 
-# Split into train/test set
+# Split into finetune/test set
 train, test_template = split(
     ds, offset=-TEST
 )  # assign last TEST time steps as test set
@@ -165,10 +165,10 @@ The validation set will be saved as DATASET_NAME_eval.
 python -m uni2ts.data.builder.simple ETTh1 dataset/ETT-small/ETTh1.csv --date_offset '2017-10-23 23:00:00'
 ```
 
-3. Finally, we can simply run the fine-tuning script with the appropriate [training](cli/conf/finetune/data/etth1.yaml) and [validation](cli/conf/finetune/val_data/etth1.yaml) data configuration files.
+3. Finally, we can simply run the fine-tuning script with the appropriate [training](cli/conf/origin/finetune/data/etth1.yaml) and [validation](cli/conf/origin/finetune/val_data/etth1.yaml) data configuration files.
 ```shell
-python -m cli.train \
-  -cp conf/finetune \
+python -m cli.finetune \
+  -cp conf/lsf \
   run_name=example_run \ 
   model=moirai_1.0_R_small \ 
   data=etth1 \ 
@@ -177,7 +177,7 @@ python -m cli.train \
 
 ### Evaluation
 
-The evaluation script can be used to calculate evaluation metrics such as MSE, MASE, CRPS, and so on (see the [configuration file](cli/conf/eval/default.yaml)). 
+The evaluation script can be used to calculate evaluation metrics such as MSE, MASE, CRPS, and so on (see the [configuration file](cli/conf/origin/eval/default.yaml)). 
 
 Given a test split (see previous section on processing datasets), we can run the following command to evaluate it:
 ```shell
@@ -189,7 +189,7 @@ python -m cli.eval \
   data=etth1_test
 ```
 
-Alternatively, we provide access to popular datasets, and can be toggled via the [data configurations](cli/conf/eval/data).
+Alternatively, we provide access to popular datasets, and can be toggled via the [data configurations](cli/conf/origin/eval/data).
 As an example, say we want to perform evaluation, again on the ETTh1 dataset from the popular [Long Sequence Forecasting benchmark](https://github.com/thuml/Time-Series-Library).
 We first need to download the pre-processed datasets and put them in the correct directory, by setting up the TSLib repository and following the instructions.
 Then, assign the dataset directory to the `LSF_PATH` environment variable:
@@ -197,7 +197,7 @@ Then, assign the dataset directory to the `LSF_PATH` environment variable:
 echo "LSF_PATH=PATH_TO_TSLIB/dataset" >> .env
 ```
 
-Thereafter, simply run the following script with the predefined [Hydra config file](cli/conf/eval/data/lsf_test.yaml):
+Thereafter, simply run the following script with the predefined [Hydra config file](cli/conf/origin/eval/data/lsf_test.yaml):
 ```shell
 python -m cli.eval \ 
   run_name=example_eval_2 \
@@ -221,7 +221,7 @@ echo "LOTSA_V1_PATH=PATH_TO_SAVE" >> .env
 Then, we can simply run the following script to start a pre-training job. 
 See the [relevant](cli/train.py) [files](cli/conf/pretrain) on how to further customize the settings.
 ```shell
-python -m cli.train \
+python -m cli.finetune \
   -cp conf/pretrain \
   run_name=first_run \
   model=moirai_small \

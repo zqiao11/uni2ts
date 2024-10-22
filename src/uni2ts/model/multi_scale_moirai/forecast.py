@@ -97,6 +97,7 @@ class MoiraiForecast(L.LightningModule):
         num_samples: int = 100,
         pretrained_checkpoint_path: str = None,
         num_new_scales: int = 1,
+        ds_factor: int = 2
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -106,6 +107,7 @@ class MoiraiForecast(L.LightningModule):
         self.module = MoiraiModule(**module_kwargs) if module is None else module
         self.per_sample_loss_func = SampleNLLLoss()
         self.num_new_scales = num_new_scales
+        self.ds_factor = ds_factor
         self.strict_loading = False
 
     @contextmanager
@@ -764,7 +766,7 @@ class MoiraiForecast(L.LightningModule):
                 # Downsample
                 past_target = self._downsample(past_target, left=True)
                 past_observed_target = self._downsample(past_observed_target, left=True)
-                past_is_pad = self._downsample(past_is_pad.bool(), left=False).int()
+                past_is_pad = self._downsample(past_is_pad.bool(), ds_factor=self.ds_factor,  left=False).int()
                 context_length = math.ceil(context_length / 2)
 
                 target.extend(
@@ -880,7 +882,7 @@ class MoiraiForecast(L.LightningModule):
             prediction_mask,
         )
 
-    def _downsample(self, arr: torch.Tensor, left: bool = True) -> torch.Tensor:
+    def _downsample(self, arr: torch.Tensor, ds_factor: int = 2, left: bool = True) -> torch.Tensor:
         # Check if the input tensor is 2D (bs, time) or 3D (*bs, time, feature)
         if arr.ndim == 2:
             # 2D case: arr is (bs, time) without feature dimension
@@ -895,8 +897,6 @@ class MoiraiForecast(L.LightningModule):
             raise ValueError(
                 "Input tensor must be either 2D (bs, time) or 3D (*bs, time, feature)"
             )
-
-        ds_factor = 2
 
         # Determine padding value based on tensor's dtype (False for Bool, NaN for float)
         if arr.dtype == torch.bool or arr.dtype == torch.int:

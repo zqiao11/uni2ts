@@ -154,10 +154,10 @@ def main(cfg: DictConfig):
     L.seed_everything(cfg.seed + trainer.logger.version, workers=True)
 
     print(
-        "Number of windows in train: ",
+        "Number of windows in finetune: ",
         train_dataset.dataset_weight * train_dataset.num_ts,
     )
-    print("Batch size for train: ", cfg.train_dataloader.batch_size)
+    print("Batch size for finetune: ", cfg.train_dataloader.batch_size)
     print(
         "Number of batches in a epoch: ",
         train_dataset.dataset_weight

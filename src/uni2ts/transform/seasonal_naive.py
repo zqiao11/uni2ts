@@ -53,7 +53,7 @@ def seasonal_naive_predict(context: np.ndarray, prediction: np.ndarray) -> np.nd
         # ToDo: For now, we only consider the case that context is longer than prediction
         # If no periodicity in context, use the last time points for forecasting.
         if period == context_len:
-            forecast = context[i, -prediction_len:]
+            forecast = np.expand_dims(context[i, -prediction_len:], axis=0)
         else:
             # Apply the seasonal naive method to forecast
             for t in range(prediction_len):
@@ -77,7 +77,7 @@ class GetSeasonalNaivePrediction(Transformation):
         """
         target: ndarray of shape (feat, time). It has been padded to make sure it can be divided by patch_size.
         """
-        target = data_entry["target"]
+        target = data_entry["target"].copy()
         context_length = data_entry["context_length"]
         prediction_length = data_entry["prediction_length"]
         patch_size = data_entry["patch_size"]
@@ -112,7 +112,8 @@ class AddSeasonalNaiveTarget(Transformation):
         """
         target: ndarray of shape (feat, num_patch, max_patch_size)
         """
-        target = data_entry["target"]
+        # QZ: Use copy to avoid the in_place operation changes "target" in data_entry
+        target = data_entry["target"].copy()
         patch_size = data_entry["patch_size"]
         num_pred_patches = data_entry["num_pred_patches"]
         prediction_length = data_entry["prediction_length"]

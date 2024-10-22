@@ -402,7 +402,7 @@ class DataLoader:
         "variate_id": np.zeros,
         "prediction_mask": np.zeros,
         "patch_size": np.zeros,
-        "sample_id": np.ones,
+        "sample_id": np.zeros,
     }
 
     def __init__(

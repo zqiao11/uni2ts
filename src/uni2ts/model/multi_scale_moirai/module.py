@@ -34,7 +34,7 @@ from uni2ts.module.position import (
     QueryKeyProjection,
     RotaryProjection,
 )
-from uni2ts.module.transformer import TransformerEncoder
+from uni2ts.module.multi_scale.transformer import TransformerEncoder
 from uni2ts.module.ts_embed import MultiInSizeLinear
 
 
@@ -124,7 +124,7 @@ class MoiraiModule(
             activation=F.silu,
             use_glu=True,
             use_qk_norm=True,
-            var_attn_bias_layer=partial(BinaryAttentionBias),
+            var_attn_bias_layer=partial(BinaryAttentionBias),  # ToDo: 这个var attn bias可以改
             time_qk_proj_layer=partial(
                 QueryKeyProjection,
                 proj_layer=RotaryProjection,

@@ -42,12 +42,14 @@ from uni2ts.optim import SchedulerType, get_scheduler
 from uni2ts.transform import (
     AddNewScaleContextSeries,
     AddObservedMask,
+    AddSampleIndex,
     AddTimeIndex,
     AddVariateIndex,
     DefaultPatchSizeConstraints,
     DummyValueImputation,
     EvalPad,
     ExtendMask,
+    FinetunePatchCrop,
     FixedPatchSizeConstraints,
     FlatPackCollection,
     FlatPackFields,
@@ -111,13 +113,8 @@ class MoiraiFinetune(L.LightningModule):
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
         num_new_scales: int = 1,
+        ds_factor: int = 2
     ):
-        assert (module is not None) or (
-            module_kwargs is not None
-        ), "if module is not provided, module_kwargs is required"
-        assert (
-            num_warmup_steps <= num_training_steps
-        ), f"num_warmup_steps ({num_warmup_steps}) should be <= num_training_steps ({num_training_steps})."
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
         self.module = MoiraiModule(**module_kwargs) if module is None else module
@@ -127,6 +124,7 @@ class MoiraiFinetune(L.LightningModule):
         self.patch_size = patch_size
         self.finetune_pattern = finetune_pattern
         self.num_new_scales = num_new_scales
+        self.ds_factor = ds_factor
 
     def forward(
         self,
@@ -408,7 +406,7 @@ class MoiraiFinetune(L.LightningModule):
             eps=1e-6,
         )
         scheduler = get_scheduler(
-            SchedulerType.COSINE_WITH_RESTARTS,
+            SchedulerType.CONSTANT,  # Use constant lr scheduler
             optimizer,
             num_warmup_steps=self.hparams.num_warmup_steps,
             num_training_steps=self.hparams.num_training_steps,
@@ -426,37 +424,26 @@ class MoiraiFinetune(L.LightningModule):
     def train_transform_map(
         self,
     ) -> dict[str | type, Callable[..., Transformation]]:
-        def default_train_transform():
+        def default_train_transform(
+            distance: int,
+            prediction_length: int,
+            context_length: int,
+            patch_size: int,
+        ):
             return (
                 GetPatchSize(
                     min_time_patches=self.hparams.min_patches,
                     target_field="target",
                     patch_sizes=self.module.patch_sizes,
-                    patch_size_constraints=(
-                        DefaultPatchSizeConstraints()
-                        if self.patch_size is None
-                        else FixedPatchSizeConstraints(self.patch_size)
-                    ),
+                    patch_size_constraints=FixedPatchSizeConstraints(patch_size),
                     offset=True,
                 )
-                + (
-                    PatchCrop(
-                        min_time_patches=self.hparams.min_patches,
-                        max_patches=self.module.max_seq_len,
-                        will_flatten=True,
-                        offset=True,
-                        fields=("target",),
-                        optional_fields=("past_feat_dynamic_real",),
-                    )
-                    if self.context_length is None or self.prediction_length is None
-                    else PatchCropGivenFixedConfig(
-                        context_length=self.context_length,
-                        prediction_length=self.prediction_length,
-                        will_flatten=True,
-                        offset=True,
-                        fields=("target",),
-                        optional_fields=("past_feat_dynamic_real",),
-                    )
+                + FinetunePatchCrop(
+                    distance,
+                    prediction_length,
+                    context_length,
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
                 )
                 + PackFields(
                     output_field="target",
@@ -467,18 +454,16 @@ class MoiraiFinetune(L.LightningModule):
                     fields=tuple(),
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                # Set the padded tokens in context (1st patch) and in prediction (the last patch) as Nan.
-                + (
-                    Identity()
-                    if self.context_length is None or self.prediction_length is None
-                    else MaskOutRangePaddedTokens(
-                        fields=("target",),
-                        optional_fields=("past_feat_dynamic_real",),
-                    )
+                + EvalPad(
+                    prediction_pad=-prediction_length % patch_size,
+                    context_pad=-context_length % patch_size,
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",),
                 )
                 #  QZ: Apply downsample to target. Create a new field 'target{i}' for each scale.
                 + AddNewScaleContextSeries(
                     target_field="target",
+                    ds_factor=self.ds_factor,
                     num_new_scales_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
@@ -522,6 +507,13 @@ class MoiraiFinetune(L.LightningModule):
                     expected_ndim=3,
                     collection_type=dict,
                 )
+                + AddSampleIndex(
+                    fields=("target",),
+                    optional_fields=("past_feat_dynamic_real",) + self.new_scales_target_fields,
+                    sample_id_field="sample_id",
+                    expected_ndim=3,
+                    collection_type=dict,
+                )
                 + MultiScaleMaskedPredictionGivenFixedConfig(
                     target_fields=("target",) + self.new_scales_target_fields,
                     prediction_mask_field="prediction_mask",
@@ -539,6 +531,10 @@ class MoiraiFinetune(L.LightningModule):
                 )
                 + FlatPackCollection(
                     field="time_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="sample_id",
                     feat=False,
                 )
                 + FlatPackCollection(
@@ -605,6 +601,7 @@ class MoiraiFinetune(L.LightningModule):
                 )
                 + AddNewScaleContextSeries(
                     target_field="target",
+                    ds_factor=self.ds_factor,
                     num_new_scales_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
@@ -648,6 +645,13 @@ class MoiraiFinetune(L.LightningModule):
                     expected_ndim=3,
                     collection_type=dict,
                 )
+                + AddSampleIndex(
+                    fields=("target",) + self.new_scales_target_fields,
+                    optional_fields=("past_feat_dynamic_real",),
+                    sample_id_field="sample_id",
+                    expected_ndim=3,
+                    collection_type=dict,
+                )
                 + MultiScaleMaskedPredictionGivenFixedConfig(
                     target_fields=("target",) + self.new_scales_target_fields,
                     prediction_mask_field="prediction_mask",
@@ -659,6 +663,10 @@ class MoiraiFinetune(L.LightningModule):
                 )
                 + FlatPackCollection(
                     field="time_id",
+                    feat=False,
+                )
+                + FlatPackCollection(
+                    field="sample_id",
                     feat=False,
                 )
                 + FlatPackCollection(

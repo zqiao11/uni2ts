@@ -166,7 +166,8 @@ class MoiraiModule(
         )
         scaled_target = (target - loc) / scale
         reprs = self.in_proj(scaled_target, patch_size)
-        masked_reprs = reprs  # Use the embedding of the seasonal naive prediction patches instead of mask embedding
+        # For pred tokens, use the embedding of the seasonal naive pred patches instead of mask embedding
+        masked_reprs = reprs
         reprs = self.encoder(
             masked_reprs,
             packed_attention_mask(sample_id),
