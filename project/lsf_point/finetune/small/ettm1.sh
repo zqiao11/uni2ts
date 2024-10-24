@@ -6,7 +6,7 @@ model=moirai_1.1_R_small
 cp=conf/lsf_point/finetune
 exp_name=lsf
 cl=3000
-ft_pattern=full
+ft_pattern=head_dp07
 
 data=ettm1
 ps=128

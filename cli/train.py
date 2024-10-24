@@ -128,7 +128,8 @@ def main(cfg: DictConfig):
 
     model: L.LightningModule = instantiate(cfg.model, _convert_="all")
 
-    # model.module.replace_forecast_head(seq_len=49, pred_len=96)
+    if hasattr(model, 'post_init') and callable(getattr(model, 'post_init')):
+        model.post_init()
 
     if "collate_fn" not in cfg.train_dataloader:
         model.seq_fields = model.seq_fields + ("sample_id",)

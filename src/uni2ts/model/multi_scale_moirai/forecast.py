@@ -40,6 +40,7 @@ from uni2ts.common.torch_util import safe_div
 from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
 
 from .module import MoiraiModule
+from uni2ts.module.multi_scale.attention import GroupedQueryAttention
 
 
 class SampleNLLLoss(_PackedNLLLoss):
@@ -107,8 +108,19 @@ class MoiraiForecast(L.LightningModule):
         self.module = MoiraiModule(**module_kwargs) if module is None else module
         self.per_sample_loss_func = SampleNLLLoss()
         self.num_new_scales = num_new_scales
+
         self.ds_factor = ds_factor
         self.strict_loading = False
+
+        self.post_init()   # ToDO: Make it optional.
+
+
+    def post_init(self):
+        for layer in self.module.encoder.layers:
+            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+                # Call post_init() method of the GroupedQueryAttention object
+                layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
 
     @contextmanager
     def hparams_context(

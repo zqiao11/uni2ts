@@ -70,6 +70,8 @@ from uni2ts.transform import (
 )
 
 from .module import MoiraiModule
+from uni2ts.module.multi_scale.attention import GroupedQueryAttention
+
 
 
 class MoiraiFinetune(L.LightningModule):
@@ -112,7 +114,7 @@ class MoiraiFinetune(L.LightningModule):
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
-        num_new_scales: int = 1,
+        num_new_scales: Optional[int] = None,
         ds_factor: int = 2,
     ):
         super().__init__()
@@ -125,6 +127,13 @@ class MoiraiFinetune(L.LightningModule):
         self.finetune_pattern = finetune_pattern
         self.num_new_scales = num_new_scales
         self.ds_factor = ds_factor
+
+    def post_init(self):
+        for layer in self.module.encoder.layers:
+            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+                # Call post_init() method of the GroupedQueryAttention object
+                layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
 
     def forward(
         self,
@@ -275,7 +284,7 @@ class MoiraiFinetune(L.LightningModule):
         #         p.requires_grad = True
 
         for pn, p in self.named_parameters():
-            if "filmed_generator" in pn:
+            if "film" in pn:
                 p.requires_grad = True
 
         # Unfreeze the corresponding params

@@ -132,7 +132,7 @@ class MoiraiModule(
         self.distr_output = None
         self.param_proj = None
 
-        self.head_dropout = nn.Dropout(p=0, inplace=False)
+        self.head_dropout = nn.Dropout(p=0.7, inplace=False)
         self.head_fc1 = nn.Linear(
             in_features=seq_len * self.d_model, out_features=self.d_model
         )

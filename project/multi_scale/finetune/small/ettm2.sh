@@ -6,7 +6,7 @@ model=moirai_1.1_R_small
 cp=conf/multi_scale/finetune
 exp_name=lsf
 cl=3000
-ft_pattern=full_0
+ft_pattern=full_film_dim
 
 data=ettm2
 ps=64

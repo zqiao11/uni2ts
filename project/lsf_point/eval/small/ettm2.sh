@@ -1,7 +1,7 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 mode=S
 cp=conf/lsf_point/eval
@@ -10,10 +10,10 @@ cl=3000
 model=moirai_lightning_ckpt
 
 
-cpp1='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head/ettm2/cl3000_pl96/checkpoints/epoch_63-step_13824.ckpt'
-cpp2='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head/ettm2/cl3000_pl192/checkpoints/epoch_52-step_11395.ckpt'
-cpp3='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head/ettm2/cl3000_pl336/checkpoints/epoch_37-step_8132.ckpt'
-cpp4='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head/ettm2/cl3000_pl720/checkpoints/epoch_32-step_6963.ckpt'
+cpp1='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head_dp02/ettm2/cl3000_pl96/checkpoints/epoch_13-step_3024.ckpt'
+cpp2='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head_dp02/ettm2/cl3000_pl192/checkpoints/epoch_6-step_1505.ckpt'
+cpp3='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head_dp02/ettm2/cl3000_pl336/checkpoints/epoch_5-step_1284.ckpt'
+cpp4='./outputs/lsf_point/finetune/moirai_1.1_R_small/lsf/head_dp02/ettm2/cl3000_pl720/checkpoints/epoch_5-step_1266.ckpt'
 
 
 index=1

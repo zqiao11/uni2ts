@@ -29,7 +29,7 @@ val_metric:
   - _target_: uni2ts.loss.packed.PackedMSELoss
   - _target_: uni2ts.loss.packed.PackedNRMSELoss
     normalize: absolute_target_squared
-lr: 5e-7  #  On ETT dataset, using 1e-6/5e-7 converge within 1-2 epochs. 1e-7 converge in tens of epochs
+lr: 5e-6  #  On ETT dataset, using 1e-6/5e-7 converge within 1-2 epochs. 1e-7 converge in tens of epochs
 weight_decay: 1e-1
 beta1: 0.9
 beta2: 0.98

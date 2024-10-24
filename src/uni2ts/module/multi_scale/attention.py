@@ -97,30 +97,46 @@ class GroupedQueryAttention(nn.Module):
         self.attn_dropout_p = attn_dropout_p
         self.out_proj = nn.Linear(dim, dim, bias=bias)
 
-        # Todo: Create these mudules based on num_new_scales & ds_factor & seq_len
-        # base = 24  # 24 for ETTH1, 12 for ETTm1
-        # self.query_filmed_generator = nn.ModuleList(
-        #     [
-        #         nn.Linear(in_features=dim, out_features=2 * base),
-        #         nn.Linear(in_features=dim, out_features=2 * base // 2),
-        #         nn.Linear(in_features=dim, out_features=2 * base // 4),
-        #     ]
-        # )
-        #
-        # self.key_filmed_generator = nn.ModuleList(
-        #     [
-        #         nn.Linear(in_features=dim, out_features=2 * base),
-        #         nn.Linear(in_features=dim, out_features=2 * base // 2),
-        #         nn.Linear(in_features=dim, out_features=2 * base // 4),
-        #     ]
-        # )
-        #
-        # # self.value_filmed_generator = nn.ModuleList(
-        # #     [
-        # #         nn.Linear(in_features=dim, out_features=2 * 12),  # each scale's length
-        # #         nn.Linear(in_features=dim, out_features=2 * 6)
-        # #     ]
-        # # )
+        self.dim = dim
+        self.num_new_scales = None
+
+    def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor):
+
+        self.num_new_scales = num_new_scales
+
+        nh = self.dim//4
+        self.film_controller = nn.Sequential(nn.Linear(self.dim, nh), nn.SiLU())
+
+        self.query_film_generator = nn.ModuleList([
+            nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
+        ])
+
+        self.key_film_generator = nn.ModuleList([
+            nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
+        ])
+
+    # def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor):
+    #
+    #     self.num_new_scales = num_new_scales
+    #
+    #     base_len = math.ceil(context_length / patch_size)  # num context patches in base scale
+    #
+    #     scale_len = math.ceil(base_len / ds_factor)
+    #     self.query_film_generator = nn.ModuleList([
+    #         nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+    #     ])
+    #     self.key_film_generator = nn.ModuleList([
+    #         nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+    #     ])
+    #
+    #     for _ in range(1, num_new_scales):
+    #         scale_len = math.ceil(scale_len / ds_factor)
+    #         self.query_film_generator.append(
+    #             nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+    #         )
+    #         self.key_film_generator.append(
+    #             nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+    #         )
 
     def _get_var_id(
         self,
@@ -290,29 +306,40 @@ class GroupedQueryAttention(nn.Module):
         value = self.v_proj(value)
 
         # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
-        # index_by_variate = self.get_token_index_by_variate(query_var_id)
+        if self.num_new_scales is not None:
+            index_by_variate = self.get_token_index_by_variate(query_var_id)
+
+            for scale in range(self.num_new_scales):
+                assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
+                index = index_by_variate[scale + 1]
+
+                query_scale = query[..., index, :]  # (bs, num_patch_new_scale, dim)
+                query_scale_reprs = self.film_controller(torch.mean(query_scale, dim=1))
+                query_weight = self.query_film_generator[scale](query_scale_reprs)
+                query[..., index, :] = query_weight.unsqueeze(-2) * query_scale
+
+                key_scale = key[..., index, :]
+                key_scale_reprs = self.film_controller(torch.mean(key_scale, dim=1))
+                key_weight = self.key_film_generator[scale](key_scale_reprs)
+                key[..., index, :] = key_weight.unsqueeze(-2) * key_scale
+
+        # if self.num_new_scales is not None:
+        #     index_by_variate = self.get_token_index_by_variate(query_var_id)
         #
-        # for scale in range(3):  # ToDO: number_of scales:
-        #     assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
-        #     index = index_by_variate[scale+1]
-        #     query_scale = query[..., index, :]
-        #     query_film_out = self.query_filmed_generator[scale](torch.mean(query_scale, dim=1))
-        #     query_weight, query_bias = query_film_out[:, :int(query_film_out.size(-1) / 2)], query_film_out[:, int(query_film_out.size(-1) / 2):]
-        #     query[..., index, :] = query_weight.unsqueeze(-1) * query_scale + query_bias.unsqueeze(-1)
+        #     for scale in range(self.num_new_scales):
+        #         assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
+        #         index = index_by_variate[scale+1]
+        #         query_scale = query[..., index, :]  # (bs, num_patch_new_scale, dim)
+        #         query_film_out = self.query_film_generator[scale](torch.mean(query_scale, dim=1))  # ToDo: 换成faltten试试？
+        #         query_weight, query_bias = query_film_out[:, :int(query_film_out.size(-1) / 2)], query_film_out[:, int(query_film_out.size(-1) / 2):]
+        #         query[..., index, :] = query_weight.unsqueeze(-1) * query_scale + query_bias.unsqueeze(-1)
         #
-        #     key_scale = key[..., index, :]
-        #     key_film_out = self.key_filmed_generator[scale](torch.mean(key_scale, dim=1))
-        #     key_weight, key_bias = key_film_out[:, :int(key_film_out.size(-1) / 2)], key_film_out[:,
-        #                                                                                      int(key_film_out.size(
-        #                                                                                          -1) / 2):]
-        #     key[..., index, :] = key_weight.unsqueeze(-1) * key_scale + key_bias.unsqueeze(-1)
-        #
-        #     # value_i = value[..., index, :]
-        #     # value_film_out = self.value_filmed_generator[scale](torch.mean(value_i, dim=1))
-        #     # value_weight, value_bias = value_film_out[:, :int(value_film_out.size(-1) / 2)], value_film_out[:,
-        #     #                                                                                  int(value_film_out.size(
-        #     #                                                                                      -1) / 2):]
-        #     # value[..., index, :] = value_weight.unsqueeze(-1) * value_i + value_bias.unsqueeze(-1)
+        #         key_scale = key[..., index, :]
+        #         key_film_out = self.key_film_generator[scale](torch.mean(key_scale, dim=1))
+        #         key_weight, key_bias = key_film_out[:, :int(key_film_out.size(-1) / 2)], key_film_out[:,
+        #                                                                                          int(key_film_out.size(
+        #                                                                                              -1) / 2):]
+        #         key[..., index, :] = key_weight.unsqueeze(-1) * key_scale + key_bias.unsqueeze(-1)
 
         query = self.q_norm(
             rearrange(
