@@ -135,6 +135,10 @@ class MoiraiFinetune(L.LightningModule):
                 # Call post_init() method of the GroupedQueryAttention object
                 layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
 
+            # ToDo: Call psot_init() method to replace BinaryAttentionBias to CrossVariateAttentionBias
+            #   from_pretrained的Pipeline是什么？先init,再load? 然后load不了的参数自动忽略？如果是这样就不用加post_init
+            #   直接再transformer处修改var_attn_bias的类型就行了
+
     def forward(
         self,
         target: Float[torch.Tensor, "*batch seq_len max_patch"],

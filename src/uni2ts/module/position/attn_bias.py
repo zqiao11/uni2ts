@@ -16,7 +16,7 @@
 import abc
 
 import torch
-from einops import rearrange
+from einops import einsum, rearrange
 from jaxtyping import Float, Int
 from torch import nn
 
@@ -67,7 +67,7 @@ class RelativeAttentionBias(AttentionBias):
 class BinaryAttentionBias(AttentionBias):
     def __init__(self, dim: int, num_heads: int, num_groups: int):
         super().__init__(dim, num_heads, num_groups)
-        self.emb = nn.Embedding(num_embeddings=2, embedding_dim=self.num_heads)
+        self.emb = nn.Embedding(num_embeddings=2, embedding_dim=self.num_heads)  # QZ: Each head has a scalr
 
     def forward(
         self,
@@ -86,6 +86,62 @@ class BinaryAttentionBias(AttentionBias):
         )
         return bias
 
+
+class CrossVariateAttentionBias(AttentionBias):
+    def __init__(self, dim: int, num_heads: int, num_groups: int, num_vars: int):
+        super().__init__(dim, num_heads, num_groups)
+        # QZ: Initialize a learnable embedding for each variate
+        # Each embedding should contain num_heads embeddings with d dimension?
+        # Each head has num_vars embeddings with d dimension
+        self.num_vars = num_vars
+        self.emb = nn.ModuleList(
+            [nn.Embedding(num_embeddings=self.num_heads, embedding_dim=dim//4) for _ in range(num_vars)]
+        )
+
+    def forward(
+        self,
+        query: Float[torch.Tensor, "*batch group hpg q_len dim"],
+        key: Float[torch.Tensor, "*batch group hpg kv_len dim"],
+        query_id: Int[torch.Tensor, "*batch 1 1 q_len"],
+        kv_id: Int[torch.Tensor, "*batch 1 1 kv_len"],
+    ) -> Float[torch.Tensor, "*batch #group #hpg q_len kv_len"]:
+        # Create empty tensors for query and kv embeddings
+        bs = query.size(0)
+        q_len, kv_len = query.size(-2), kv_id.size(-2)
+        q_emb = torch.empty((q_len, self.num_heads, self.dim//4), device=query.device)
+        kv_emb = torch.empty((kv_len, self.num_heads, self.dim//4), device=key.device)
+        index_by_variate = self.get_token_index_by_variate(query_id)
+
+        # Insert the emb based on variate_id
+        for i in range(self.num_vars):
+            index = index_by_variate[i]
+            q_emb[index, :, :] = self.emb[i].weight
+            kv_emb[index, :, :] = self.emb[i].weight
+
+        # Matrix multiplication
+        bias = einsum(q_emb, kv_emb, "q_len n_heads dim , kv_len n_heads dim -> n_heads q_len kv_len")
+        bias = rearrange(
+            bias,
+            "(group hpg) q_len kv_len -> bs group hpg q_len kv_len",
+            bs=bs,
+            group=self.num_groups,
+            hpg=self.heads_per_group,
+        )
+        return bias
+
+    def get_token_index_by_variate(
+        self,
+        variate_id: Int[torch.Tensor, "*batch q_len"],
+    ):
+        # batch中所有的variate_id是一样的
+        variate_id = variate_id[0]
+        max_variate_id = variate_id.max().item()
+        indices_by_variate = []
+        for vid in range(max_variate_id + 1):
+            indices = torch.nonzero(variate_id == vid, as_tuple=True)[0]
+            indices_by_variate.append(indices)
+
+        return indices_by_variate
 
 class LinearAttentionBias(AttentionBias):
     def __init__(self, dim: int, num_heads: int, num_groups: int):

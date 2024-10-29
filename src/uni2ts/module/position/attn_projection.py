@@ -56,7 +56,7 @@ class RotaryProjection(Projection):
     def __init__(
         self,
         *,
-        proj_width: int,
+        proj_width: int,  # ToDo: 这个proj_width怎么传进来的？get_layer传的是dim？
         num_heads: int,
         num_groups: int,
         max_len: int = 512,
@@ -66,7 +66,7 @@ class RotaryProjection(Projection):
         assert (
             self.proj_width % 2 == 0
         ), f"proj_width must be even, got {self.proj_width}"
-        self.register_buffer(
+        self.register_buffer(  # QZ: Eq 15
             "theta",
             1.0
             / torch.pow(

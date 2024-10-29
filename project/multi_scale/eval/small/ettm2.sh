@@ -9,7 +9,7 @@ exp_name=lsf
 cl=3000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/multi_scale/finetune/moirai_1.1_R_small/lsf/full_film_dim/ettm2/cl3000_pl96/checkpoints/epoch_5-step_2586.ckpt'
+cpp1='./outputs/multi_scale/finetune/moirai_1.1_R_small/lsf/full_film_dim/ettm2/cl3000_pl96/checkpoints/epoch_4-step_2155.ckpt'
 cpp2='./outputs/multi_scale/finetune/moirai_1.1_R_small/lsf/full_film_dim/ettm2/cl3000_pl192/checkpoints/epoch_1-step_858.ckpt'
 cpp3='./outputs/multi_scale/finetune/moirai_1.1_R_small/lsf/full_film_dim/ettm2/cl3000_pl336/checkpoints/epoch_0-step_427.ckpt'
 cpp4='./outputs/multi_scale/finetune/moirai_1.1_R_small/lsf/full_film_dim/ettm2/cl3000_pl720/checkpoints/epoch_0-step_422.ckpt'

@@ -17,6 +17,7 @@ from .additive import LearnedEmbedding, SinusoidalPositionEncoding
 from .attn_bias import (
     AttentionBias,
     BinaryAttentionBias,
+    CrossVariateAttentionBias,
     LinearAttentionBias,
     RelativeAttentionBias,
 )
@@ -33,6 +34,7 @@ __all__ = [
     "IdentityProjection",
     "RelativeAttentionBias",
     "BinaryAttentionBias",
+    "CrossVariateAttentionBias",
     "LearnedEmbedding",
     "LearnedProjection",
     "LinearAttentionBias",
