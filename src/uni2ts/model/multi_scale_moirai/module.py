@@ -32,8 +32,10 @@ from uni2ts.module.norm import RMSNorm
 from uni2ts.module.packed_scaler import PackedNOPScaler, PackedStdScaler
 from uni2ts.module.position import (
     BinaryAttentionBias,
+    CrossVariateAttentionBias,
     QueryKeyProjection,
     RotaryProjection,
+    MultiScaleRotaryProjection
 )
 from uni2ts.module.ts_embed import MultiInSizeLinear
 
@@ -80,7 +82,6 @@ class MoiraiModule(
         attn_dropout_p: float,
         dropout_p: float,
         scaling: bool = True,
-        num_new_scales: int = 2,
     ):
         """
         :param distr_output: distribution output object
@@ -126,12 +127,19 @@ class MoiraiModule(
             use_qk_norm=True,
             var_attn_bias_layer=partial(
                 BinaryAttentionBias
-            ),  # ToDo: 这个var attn bias可以改
+                # CrossVariateAttentionBias,
+                # num_vars=4   # ToDo: 这个num_vars得提供外部接口
+            ),
             time_qk_proj_layer=partial(
                 QueryKeyProjection,
-                proj_layer=RotaryProjection,
+                proj_layer=MultiScaleRotaryProjection,
                 kwargs=dict(max_len=max_seq_len),
-                partial_factor=(0.0, 0.5),
+                partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
+
+                # QueryKeyProjection,
+                # proj_layer=RotaryProjection,  # ToDo: 可以改
+                # kwargs=dict(max_len=max_seq_len),
+                # partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
             ),
             shared_var_attn_bias=False,
             shared_time_qk_proj=True,
@@ -140,7 +148,7 @@ class MoiraiModule(
         self.distr_output = distr_output
         self.param_proj = self.distr_output.get_param_proj(d_model, patch_sizes)
 
-        self.num_new_scales = num_new_scales
+        # self.num_new_scales = num_new_scales
 
     def forward(
         self,
@@ -196,43 +204,3 @@ class MoiraiModule(
         distr_param = self.param_proj(reprs, patch_size)
         distr = self.distr_output.distribution(distr_param, loc=loc, scale=scale)
         return distr
-
-    def add_new_scale_embedding(
-        self,
-        reprs: Float[torch.Tensor, "*batch seq_len d_model"],
-        sample_id: Int[torch.Tensor, "*batch seq_len"],
-        variate_id: Int[torch.Tensor, "*batch seq_len"],
-    ):
-
-        # Each item has the same number of samples.
-        num_samples_per_item = torch.max(sample_id).item()
-
-        # Each sample has the same seq_len
-        sample_mask = torch.eq(sample_id.unsqueeze(-1), sample_id.unsqueeze(-2))
-        sample_seq_len = sample_mask[0][0].int().sum().item()
-
-        variate_diff = torch.diff(variate_id[0], dim=-1)
-        variate_change_points = torch.nonzero(variate_diff).flatten() + 1
-        variate_change_points = torch.cat(
-            [
-                variate_change_points,
-                torch.tensor([variate_id.shape[1]]).to(variate_id.device),
-            ]
-        )
-
-        for i in range(self.num_new_scales):
-            index_scale_i = []  # index of new scale i in all the samples
-
-            for sample in range(num_samples_per_item):
-                variate_start_idx = (
-                    variate_change_points[i].item() + sample * sample_seq_len
-                )
-                variate_end_idx = (
-                    variate_change_points[i + 1].item() + sample * sample_seq_len
-                )
-                index_scale_i.append((variate_start_idx, variate_end_idx))
-
-            for start, end in index_scale_i:
-                reprs[..., start:end, :] += self.new_scale_encoding[i].weight
-
-        return reprs

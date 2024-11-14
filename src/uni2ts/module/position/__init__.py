@@ -27,6 +27,7 @@ from .attn_projection import (
     Projection,
     QueryKeyProjection,
     RotaryProjection,
+    MultiScaleRotaryProjection
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     "QueryKeyProjection",
     "RotaryProjection",
     "SinusoidalPositionEncoding",
+    "MultiScaleRotaryProjection"
 ]

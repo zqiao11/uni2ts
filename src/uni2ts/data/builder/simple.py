@@ -243,7 +243,7 @@ class SimpleDatasetBuilder(DatasetBuilder):
             example_gen_func, features=features
         )
         hf_dataset.info.dataset_name = self.dataset
-        hf_dataset.save_to_disk(self.storage_path / self.dataset)
+        hf_dataset.save_to_disk(self.storage_path / 'lsf' / self.dataset)
 
     def load_dataset(
         self, transform_map: dict[str, Callable[..., Transformation]]
@@ -251,7 +251,7 @@ class SimpleDatasetBuilder(DatasetBuilder):
         return TimeSeriesDataset(
             HuggingFaceDatasetIndexer(
                 datasets.load_from_disk(
-                    str(self.storage_path / self.dataset),
+                    str(self.storage_path / 'lsf' / self.dataset),
                 )
             ),
             transform=transform_map[self.dataset](),
@@ -331,7 +331,7 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
             example_gen_func, features=features
         )
         hf_dataset.info.dataset_name = self.dataset
-        hf_dataset.save_to_disk(self.storage_path / self.dataset)
+        hf_dataset.save_to_disk(self.storage_path / 'lsf' / self.dataset)
 
     def load_dataset(
         self, transform_map: dict[str, Callable[..., Transformation]]
@@ -340,7 +340,7 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
             self.windows,
             HuggingFaceDatasetIndexer(
                 datasets.load_from_disk(
-                    str(self.storage_path / self.dataset),
+                    str(self.storage_path / 'lsf' / self.dataset),
                 )
             ),
             transform=transform_map[self.dataset](
@@ -402,7 +402,7 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
             example_gen_func, features=features
         )
         hf_dataset.info.dataset_name = self.dataset
-        hf_dataset.save_to_disk(self.storage_path / self.dataset)
+        hf_dataset.save_to_disk(self.storage_path / 'lsf' / self.dataset)
 
     def load_dataset(
         self, transform_map: dict[str, Callable[..., Transformation]]
@@ -411,7 +411,7 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
             self.windows,
             HuggingFaceDatasetIndexer(
                 datasets.load_from_disk(
-                    str(self.storage_path / self.dataset),
+                    str(self.storage_path / 'lsf' / self.dataset),
                 )
             ),
             transform=transform_map[self.dataset](

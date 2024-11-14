@@ -26,7 +26,7 @@ from uni2ts.common import hydra_util  # noqa: hydra resolvers
 from uni2ts.eval_util.evaluation import evaluate_model
 
 
-@hydra.main(version_base="1.3", config_path="conf/origin/eval", config_name="default")
+@hydra.main(version_base="1.3", config_path="conf/lsf-setup/origin/eval", config_name="default")
 def main(cfg: DictConfig):
     # Set display options
     pd.set_option("display.max_columns", None)

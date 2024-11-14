@@ -306,22 +306,22 @@ class GroupedQueryAttention(nn.Module):
         value = self.v_proj(value)
 
         # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
-        if self.num_new_scales is not None:
-            index_by_variate = self.get_token_index_by_variate(query_var_id)
-
-            for scale in range(self.num_new_scales):
-                assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
-                index = index_by_variate[scale + 1]
-
-                query_scale = query[..., index, :]  # (bs, num_patch_new_scale, dim)
-                query_scale_reprs = self.film_controller(torch.mean(query_scale, dim=1))
-                query_weight = self.query_film_generator[scale](query_scale_reprs)
-                query[..., index, :] = query_weight.unsqueeze(-2) * query_scale
-
-                key_scale = key[..., index, :]
-                key_scale_reprs = self.film_controller(torch.mean(key_scale, dim=1))
-                key_weight = self.key_film_generator[scale](key_scale_reprs)
-                key[..., index, :] = key_weight.unsqueeze(-2) * key_scale
+        # if self.num_new_scales is not None:
+        #     index_by_variate = self.get_token_index_by_variate(query_var_id)
+        #
+        #     for scale in range(self.num_new_scales):
+        #         assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
+        #         index = index_by_variate[scale + 1]
+        #
+        #         query_scale = query[..., index, :]  # (bs, num_patch_new_scale, dim)
+        #         query_scale_reprs = self.film_controller(torch.mean(query_scale, dim=1))
+        #         query_weight = self.query_film_generator[scale](query_scale_reprs)
+        #         query[..., index, :] = query_weight.unsqueeze(-2) * query_scale
+        #
+        #         key_scale = key[..., index, :]
+        #         key_scale_reprs = self.film_controller(torch.mean(key_scale, dim=1))
+        #         key_weight = self.key_film_generator[scale](key_scale_reprs)
+        #         key[..., index, :] = key_weight.unsqueeze(-2) * key_scale
 
         # if self.num_new_scales is not None:
         #     index_by_variate = self.get_token_index_by_variate(query_var_id)

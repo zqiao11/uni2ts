@@ -36,6 +36,7 @@ from uni2ts.module.position import (
     BinaryAttentionBias,
     LearnedEmbedding,
     LearnedProjection,
+    MultiScaleRotaryProjection
 )
 from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
@@ -128,16 +129,48 @@ class MoiraiFinetune(L.LightningModule):
         self.num_new_scales = num_new_scales
         self.ds_factor = ds_factor
 
-    def post_init(self):
-        for layer in self.module.encoder.layers:
-            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-                # Call post_init() method of the GroupedQueryAttention object
-                layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
+        self.token_idx_per_scale = self._get_token_idx_per_scale()
 
-            # ToDo: Call psot_init() method to replace BinaryAttentionBias to CrossVariateAttentionBias
+    def post_init(self):
+        # for layer in self.module.encoder.layers:
+        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+        #         # Call post_init() method of the GroupedQueryAttention object
+        #         layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
+
+        for module in self.module.encoder.modules():
+            if isinstance(module, MultiScaleRotaryProjection):
+                module.post_init(self.token_idx_per_scale)
+
+            # ToDo: Call post_init() method to replace BinaryAttentionBias to CrossVariateAttentionBias
             #   from_pretrained的Pipeline是什么？先init,再load? 然后load不了的参数自动忽略？如果是这样就不用加post_init
             #   直接再transformer处修改var_attn_bias的类型就行了
+
+
+    def _get_token_idx_per_scale(self):
+        base_token_len = math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
+        ctx_len = self.context_length
+        new_scale_token_len = []
+
+        # New scales only include context part.
+        for i in range(self.num_new_scales):
+            ctx_len = math.ceil(ctx_len / self.ds_factor)
+            ctx_token_len = math.ceil(ctx_len / self.patch_size)
+
+            new_scale_token_len.append(ctx_token_len)
+
+        token_idx_per_scale = [list(range(base_token_len))]
+
+        for i in range(self.num_new_scales):
+            start = base_token_len if i == 0 else end
+            end = start + new_scale_token_len[i]
+
+            index = list(range(start, end))
+            token_idx_per_scale.append(index)
+
+        return token_idx_per_scale
+
+
 
     def forward(
         self,
@@ -289,6 +322,9 @@ class MoiraiFinetune(L.LightningModule):
 
         for pn, p in self.named_parameters():
             if "film" in pn:
+                p.requires_grad = True
+
+            if "var_attn_bias.emb" in pn:
                 p.requires_grad = True
 
         # Unfreeze the corresponding params

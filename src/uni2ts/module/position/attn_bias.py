@@ -16,7 +16,7 @@
 import abc
 
 import torch
-from einops import einsum, rearrange
+from einops import einsum, rearrange, repeat
 from jaxtyping import Float, Int
 from torch import nn
 
@@ -93,6 +93,7 @@ class CrossVariateAttentionBias(AttentionBias):
         # QZ: Initialize a learnable embedding for each variate
         # Each embedding should contain num_heads embeddings with d dimension?
         # Each head has num_vars embeddings with d dimension
+        self.dim = dim
         self.num_vars = num_vars
         self.emb = nn.ModuleList(
             [nn.Embedding(num_embeddings=self.num_heads, embedding_dim=dim//4) for _ in range(num_vars)]
@@ -107,10 +108,10 @@ class CrossVariateAttentionBias(AttentionBias):
     ) -> Float[torch.Tensor, "*batch #group #hpg q_len kv_len"]:
         # Create empty tensors for query and kv embeddings
         bs = query.size(0)
-        q_len, kv_len = query.size(-2), kv_id.size(-2)
+        q_len, kv_len = query.size(-2), key.size(-2)
         q_emb = torch.empty((q_len, self.num_heads, self.dim//4), device=query.device)
         kv_emb = torch.empty((kv_len, self.num_heads, self.dim//4), device=key.device)
-        index_by_variate = self.get_token_index_by_variate(query_id)
+        index_by_variate = self.get_token_index_by_variate(query_id.squeeze())
 
         # Insert the emb based on variate_id
         for i in range(self.num_vars):
@@ -122,11 +123,17 @@ class CrossVariateAttentionBias(AttentionBias):
         bias = einsum(q_emb, kv_emb, "q_len n_heads dim , kv_len n_heads dim -> n_heads q_len kv_len")
         bias = rearrange(
             bias,
-            "(group hpg) q_len kv_len -> bs group hpg q_len kv_len",
-            bs=bs,
+            "(group hpg) q_len kv_len -> group hpg q_len kv_len",
             group=self.num_groups,
             hpg=self.heads_per_group,
         )
+
+        bias = repeat(
+            bias,
+            "group hpg q_len kv_len -> bs group hpg q_len kv_len",
+            bs=bs
+        )
+
         return bias
 
     def get_token_index_by_variate(
@@ -142,6 +149,7 @@ class CrossVariateAttentionBias(AttentionBias):
             indices_by_variate.append(indices)
 
         return indices_by_variate
+
 
 class LinearAttentionBias(AttentionBias):
     def __init__(self, dim: int, num_heads: int, num_groups: int):

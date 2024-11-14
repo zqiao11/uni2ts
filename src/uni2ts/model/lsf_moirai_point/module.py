@@ -132,11 +132,13 @@ class MoiraiModule(
         self.distr_output = None
         self.param_proj = None
 
-        self.head_dropout = nn.Dropout(p=0.7, inplace=False)
-        self.head_fc1 = nn.Linear(
-            in_features=seq_len * self.d_model, out_features=self.d_model
-        )
-        self.head_fc2 = nn.Linear(in_features=self.d_model, out_features=pred_len)
+        # self.head_dropout = nn.Dropout(p=0.7, inplace=False)
+        # self.head_fc1 = nn.Linear(
+        #     in_features=seq_len * self.d_model, out_features=self.d_model
+        # )
+        # self.head_fc2 = nn.Linear(in_features=self.d_model, out_features=pred_len)
+
+        self.head = CNNPredictionHead(input_dim=self.d_model, hidden_dim=self.d_model//4, seq_len=seq_len, output_dim=pred_len)
 
     def forward(
         self,
@@ -184,10 +186,60 @@ class MoiraiModule(
             var_id=variate_id,
         )
 
-        reprs = self.head_dropout(reprs.flatten(1))
-        pred = self.head_fc1(reprs)
-        pred = self.head_fc2(pred)  # (bs, pl)
+        # reprs = self.head_dropout(reprs.flatten(1))
+        # pred = self.head_fc1(reprs)
+        # pred = self.head_fc2(pred)  # (bs, pl)
+
+        pred = self.head(reprs)
+
         loc = loc[:, 0]
         scale = scale[:, 0]
         pred = pred * scale + loc
+        return pred
+
+
+class CNNPredictionHead(nn.Module):
+    def __init__(self, input_dim, hidden_dim, output_dim, seq_len, kernel_size=3):
+        """
+        Args:
+            input_dim: 每个时间步的特征维度
+            hidden_dim: CNN 中间层的隐藏维度
+            output_dim: 最终预测的输出维度
+            kernel_size: 卷积核大小
+        """
+        super(CNNPredictionHead, self).__init__()
+
+        # 1D卷积层，用于提取局部特征
+        self.conv1 = nn.Conv1d(in_channels=input_dim, out_channels=hidden_dim, kernel_size=kernel_size,
+                               padding=kernel_size // 2)
+
+        # 1D卷积层，进一步提取特征
+        self.conv2 = nn.Conv1d(in_channels=hidden_dim, out_channels=hidden_dim, kernel_size=kernel_size,
+                               padding=kernel_size // 2)
+
+        # 全连接层，将展开后的特征映射到预测输出
+        self.fc = nn.Linear(hidden_dim * seq_len, output_dim)
+
+    def forward(self, reprs):
+        """
+        Args:
+            reprs: Tensor, 输入的序列特征，形状为 (bs, seq_len, dim)
+        Returns:
+            pred: Tensor, 预测结果，形状为 (bs, output_dim)
+        """
+        # 将 reprs 从 (bs, seq_len, dim) 转置为 (bs, dim, seq_len) 以便于 1D 卷积处理
+        reprs = reprs.permute(0, 2, 1)  # 转置为 (bs, dim, seq_len)
+
+        # 通过第一个卷积层
+        x = F.relu(self.conv1(reprs))
+
+        # 通过第二个卷积层
+        x = F.relu(self.conv2(x))
+
+        # 展开特征，将 (bs, hidden_dim, seq_len) 展开为 (bs, seq_len * hidden_dim)
+        x = x.view(x.size(0), -1)
+
+        # 全连接层进行最终预测
+        pred = self.fc(x)
+
         return pred

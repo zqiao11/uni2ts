@@ -23,7 +23,7 @@ from jaxtyping import Bool, Float, Int
 from torch import nn
 
 from ..ffn import FeedForward, GatedLinearUnitFeedForward
-from ..position import AttentionBias, QueryKeyProjection
+from ..position import AttentionBias, QueryKeyProjection, MultiScaleRotaryProjection
 from .attention import GroupedQueryAttention
 
 

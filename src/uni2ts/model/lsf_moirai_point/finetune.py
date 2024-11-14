@@ -318,6 +318,7 @@ class MoiraiFinetune(L.LightningModule):
             MultiInSizeLinear,
             MultiOutSizeLinear,
             nn.Linear,
+            nn.Conv1d
         )
         blacklist_params = (
             BinaryAttentionBias,

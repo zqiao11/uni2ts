@@ -1,0 +1,6 @@
+_target_: uni2ts.data.builder.pf_simple.generate_finetune_builder
+dataset: electricity
+train_length: 26112
+prediction_length: ???
+context_length: ???
+patch_size: ???

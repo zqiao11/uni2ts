@@ -43,6 +43,15 @@ from .module import MoiraiModule
 from uni2ts.module.multi_scale.attention import GroupedQueryAttention
 
 
+from uni2ts.module.position import (
+    BinaryAttentionBias,
+    LearnedEmbedding,
+    LearnedProjection,
+    MultiScaleRotaryProjection
+)
+
+
+
 class SampleNLLLoss(_PackedNLLLoss):
     def reduce_loss(
         self,
@@ -112,15 +121,47 @@ class MoiraiForecast(L.LightningModule):
         self.ds_factor = ds_factor
         self.strict_loading = False
 
+        self.token_idx_per_scale = self._get_token_idx_per_scale()
+
         self.post_init()   # ToDO: Make it optional.
 
 
+
     def post_init(self):
-        for layer in self.module.encoder.layers:
-            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-                # Call post_init() method of the GroupedQueryAttention object
-                layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
+        # for layer in self.module.encoder.layers:
+        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+        #         # Call post_init() method of the GroupedQueryAttention object
+        #         layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
+
+        for module in self.module.encoder.modules():
+            if isinstance(module, MultiScaleRotaryProjection):
+                module.post_init(self.token_idx_per_scale)
+
+
+    def _get_token_idx_per_scale(self):
+        base_token_len = math.ceil(self.hparams.context_length / self.hparams.patch_size) + math.ceil(self.hparams.prediction_length / self.hparams.patch_size)
+        ctx_len = self.hparams.context_length
+        new_scale_token_len = []
+
+        # New scales only include context part.
+        for i in range(self.num_new_scales):
+            ctx_len = math.ceil(ctx_len / self.ds_factor)
+            ctx_token_len = math.ceil(ctx_len / self.hparams.patch_size)
+
+            new_scale_token_len.append(ctx_token_len)
+
+        token_idx_per_scale = [list(range(base_token_len))]
+
+        for i in range(self.num_new_scales):
+            start = base_token_len if i == 0 else end
+            end = start + new_scale_token_len[i]
+
+            index = list(range(start, end))
+            token_idx_per_scale.append(index)
+
+        return token_idx_per_scale
+
 
     @contextmanager
     def hparams_context(

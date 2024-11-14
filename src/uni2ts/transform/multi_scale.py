@@ -22,7 +22,7 @@ class AddNewScaleContextSeries(CheckArrNDimMixin, Transformation):
     """
 
     target_field: str
-    ds_factor: str
+    ds_factor: int
     num_new_scales_fields: tuple[str, ...]
     expected_ndim: int = 2
 

@@ -1,0 +1,7 @@
+_target_: uni2ts.data.builder.pf_simple.generate_eval_builder
+dataset: istanbul_traffic_eval
+offset: 14052
+eval_length: 24
+prediction_length: ???
+context_length: ???
+patch_size: ???
