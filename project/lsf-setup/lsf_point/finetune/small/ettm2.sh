@@ -2,7 +2,7 @@
 
 export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
-model=moirai_1.1_R_small
+model=moirai_1.0_R_small
 cp=conf/lsf-setup/lsf_point/finetune
 exp_name=lsf
 cl=3000

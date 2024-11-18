@@ -41,6 +41,7 @@ from uni2ts.transform import Transformation
 from typing import List, NamedTuple, Optional, cast
 from .simple import _from_long_dataframe, _from_wide_dataframe, _from_wide_dataframe_multivariate
 
+import numpy as np
 
 # Codes are adopted from Gluonts dataset module
 # https://ts.gluon.ai/stable/_modules/gluonts/dataset/repository/datasets.html
@@ -201,6 +202,20 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
                 df = pd.read_csv(file)
                 df.Date_Time = pd.to_datetime(df.Date_Time, format="%d.%m.%Y %H:%M")
                 df = df.set_index("Date_Time")
+
+            elif 'walmart' in self.dataset:
+                df = pd.read_csv(file)
+                data = []
+                for id, row in df[["Store", "Dept"]].drop_duplicates().iterrows():
+                    row_df = df.query(f"Store == {row.Store} and Dept == {row.Dept}")
+                    if len(row_df) != 143:
+                        continue
+                    data.append(row_df.Weekly_Sales.to_numpy())
+                data = np.stack(data, 1)
+                column_names = range(data.shape[1])
+                df = pd.DataFrame(data, columns=column_names)
+                df.index = pd.date_range(start="2010-02-05", periods=data.shape[0], freq="W")
+
             else:
                 df = pd.read_csv(file, index_col=0, parse_dates=True)
 
@@ -313,6 +328,18 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
                 df = pd.read_csv(file)
                 df.Date_Time = pd.to_datetime(df.Date_Time, format="%d.%m.%Y %H:%M")
                 df = df.set_index("Date_Time")
+            elif 'walmart' in self.dataset:
+                df = pd.read_csv(file)
+                data = []
+                for id, row in df[["Store", "Dept"]].drop_duplicates().iterrows():
+                    row_df = df.query(f"Store == {row.Store} and Dept == {row.Dept}")
+                    if len(row_df) != 143:
+                        continue
+                    data.append(row_df.Weekly_Sales.to_numpy())
+                data = np.stack(data, 1)
+                column_names = range(data.shape[1])
+                df = pd.DataFrame(data, columns=column_names)
+                df.index = pd.date_range(start="2010-02-05", periods=data.shape[0], freq="W")
             else:
                 df = pd.read_csv(file, index_col=0, parse_dates=True)
 

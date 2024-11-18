@@ -5,12 +5,12 @@ export CUDA_VISIBLE_DEVICES=2
 
 cp=conf/pf-setup/pf/eval
 exp_name=pf
-cl=3000
+cl=1000
 pl=24
 model=moirai_lightning_ckpt
 
 
-cpp='./outputs/pf-setup/pf/finetune/moirai_1.1_R_small/pf/full/turkey_power/cl3000_pl24/checkpoints/epoch_41-step_1428.ckpt'
+cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_small/pf/full/turkey_power/cl1000_pl24/checkpoints/epoch_0-step_37.ckpt'
 
 
 pretrained_model=$(echo $cpp | cut -d'/' -f6)

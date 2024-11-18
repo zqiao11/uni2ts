@@ -92,7 +92,7 @@ def _get_kdd_2022_gen_func(data_path: Path) -> tuple[GenFunc, Features]:
 
 
 def _get_godaddy_gen_func(data_path: Path) -> tuple[GenFunc, Features]:
-    train = pd.read_csv(data_path / "finetune.csv")
+    train = pd.read_csv(data_path / "train.csv")
     test = pd.read_csv(data_path / "revealed_test.csv")
     df = pd.concat([train, test])
     df["first_day_of_month"] = pd.to_datetime(df["first_day_of_month"])
@@ -124,7 +124,7 @@ def _get_favorita_sales_gen_func(
     data_path: Path, length_threshold: int = 250, missing_threshold: float = 0.5
 ) -> tuple[GenFunc, Features]:
     train = pd.read_csv(
-        data_path / "finetune.csv",
+        data_path / "train.csv",
         dtype=dict(
             id=int, store_nbr=int, item_nbr=int, unit_sales=int, onpromotion=bool
         ),

@@ -6,7 +6,7 @@ export CUDA_VISIBLE_DEVICES=0
 mode=S
 cp=conf/lsf-setup/origin/eval
 exp_name=lsf
-cl=3000
+cl=5000
 model=moirai_lightning_ckpt
 
 cpp1='./outputs/lsf/moirai_1.1_R_small/lsf/full_sn/etth1/cl3000_pl96/checkpoints/epoch_21-step_220.ckpt'

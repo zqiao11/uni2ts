@@ -1,11 +1,11 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
-model=moirai_1.1_R_small
+model=moirai_1.0_R_small
 cp=conf/pf-setup/pf/finetune
 exp_name=pf
-cl=3000
+cl=2000
 pl=24
 ft_pattern=full
 

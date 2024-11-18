@@ -29,6 +29,13 @@ python -m uni2ts.data.builder.pf_simple \
 
 
 python -m uni2ts.data.builder.pf_simple \
+  walmart \
+  "${path_prefix}/walmart-recruiting-store-sales-forecasting/train.csv" \
+  --dataset_type $ds_type \
+  --offset -40 \
+
+
+python -m uni2ts.data.builder.pf_simple \
   bizitobs_l2c \
   "${path_prefix}/BizITObs/L2C.csv" \
   --dataset_type $ds_type \

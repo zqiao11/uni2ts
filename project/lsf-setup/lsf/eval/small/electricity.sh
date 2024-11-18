@@ -3,17 +3,20 @@
 export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=0
 
-mode=S
 cp=conf/lsf-setup/lsf/eval
 exp_name=lsf
-cl=3000
 model=moirai_lightning_ckpt
+data=electricity
+cl=5000
+ps=64
+mode=S
 
 
 cpp1=''
 cpp2=''
 cpp3=''
 cpp4=''
+
 index=1
 for pl in 96 192 336 720; do
   case $index in
@@ -30,12 +33,12 @@ for pl in 96 192 336 720; do
     -cp $cp \
     exp_name=$exp_name/$pretrained_model/$ft_pattern  \
     model=$model \
-    model.patch_size=64 \
+    model.patch_size=$ps \
     model.context_length=$cl \
     model.checkpoint_path=$cpp \
     model.pretrained_checkpoint_path=ckpt/$pretrained_model.ckpt \
     data=lsf_test \
-    data.dataset_name=electricity \
+    data.dataset_name=$data \
     data.mode=$mode \
     data.prediction_length=$pl
 

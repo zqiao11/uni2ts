@@ -101,14 +101,6 @@ class MoiraiModule(
         self.scaling = scaling
 
         self.mask_encoding = nn.Embedding(num_embeddings=1, embedding_dim=d_model)
-
-        # self.new_scale_encoding = nn.ModuleList(
-        #     [
-        #         nn.Embedding(num_embeddings=1, embedding_dim=d_model)
-        #         for _ in range(num_new_scales)
-        #     ]
-        # )
-
         self.scaler = PackedStdScaler() if scaling else PackedNOPScaler()
         self.in_proj = MultiInSizeLinear(
             in_features_ls=patch_sizes,
@@ -131,15 +123,15 @@ class MoiraiModule(
                 # num_vars=4   # ToDo: 这个num_vars得提供外部接口
             ),
             time_qk_proj_layer=partial(
-                QueryKeyProjection,
-                proj_layer=MultiScaleRotaryProjection,
-                kwargs=dict(max_len=max_seq_len),
-                partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
-
                 # QueryKeyProjection,
-                # proj_layer=RotaryProjection,  # ToDo: 可以改
+                # proj_layer=MultiScaleRotaryProjection,
                 # kwargs=dict(max_len=max_seq_len),
                 # partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
+
+                QueryKeyProjection,
+                proj_layer=RotaryProjection,  # ToDo: 可以改
+                kwargs=dict(max_len=max_seq_len),
+                partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
             ),
             shared_var_attn_bias=False,
             shared_time_qk_proj=True,
@@ -189,11 +181,6 @@ class MoiraiModule(
         scaled_target = (target - loc) / scale
         reprs = self.in_proj(scaled_target, patch_size)
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
-
-        # # ToDo: Plan 1. Add learnable variate embedding to the tokens of each new scales
-        # masked_reprs = self.add_new_scale_embedding(
-        #     masked_reprs, sample_id=sample_id, variate_id=variate_id
-        # )
 
         reprs = self.encoder(
             masked_reprs,

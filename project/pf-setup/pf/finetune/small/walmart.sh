@@ -6,11 +6,11 @@ model=moirai_1.0_R_small
 cp=conf/pf-setup/pf/finetune
 exp_name=pf
 cl=1000
-pl=24
+pl=8
 ft_pattern=full
 
-data=turkey_power
-ps=64
+data=walmart
+ps=32
 
 python -m cli.train \
 -cp $cp \
@@ -29,5 +29,3 @@ val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl
-#model.lr=5e-7
-#train_dataloader.batch_size=128

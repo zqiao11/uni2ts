@@ -3,20 +3,22 @@
 export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=1
 
-mode=S
 cp=conf/lsf-setup/lsf/eval
 exp_name=lsf
-cl=3000
 model=moirai_lightning_ckpt
+data=weather
+cl=2000
+ps=128
+mode=S
 
 
-cpp1='./outputs/lsf/finetune/moirai_1.1_R_small/lsf/full/weather/cl3000_pl96/checkpoints/epoch_14-step_10395.ckpt'
-cpp2='./outputs/lsf/finetune/moirai_1.1_R_small/lsf/full/weather/cl3000_pl192/checkpoints/epoch_11-step_8304.ckpt'
-cpp3='./outputs/lsf/finetune/moirai_1.1_R_small/lsf/full/weather/cl3000_pl336/checkpoints/epoch_6-step_4823.ckpt'
-cpp4='./outputs/lsf/finetune/moirai_1.1_R_small/lsf/full/weather/cl3000_pl720/checkpoints/epoch_3-step_2724.ckpt'
+cpp1=''
+cpp2=''
+cpp3=''
+cpp4=''
 
 index=1
-for pl in 96 192 336 ; do  # 720
+for pl in 96 192 336 720 ; do
   case $index in
     1) cpp=$cpp1 ;;
     2) cpp=$cpp2 ;;
@@ -31,12 +33,12 @@ for pl in 96 192 336 ; do  # 720
     -cp $cp \
     exp_name=$exp_name/$pretrained_model/$ft_pattern  \
     model=$model \
-    model.patch_size=128 \
+    model.patch_size=$ps \
     model.context_length=$cl \
     model.checkpoint_path=$cpp \
     model.pretrained_checkpoint_path=ckpt/$pretrained_model.ckpt \
     data=lsf_test \
-    data.dataset_name=weather \
+    data.dataset_name=$data \
     data.mode=$mode \
     data.prediction_length=$pl
 

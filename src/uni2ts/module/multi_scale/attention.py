@@ -100,43 +100,43 @@ class GroupedQueryAttention(nn.Module):
         self.dim = dim
         self.num_new_scales = None
 
-    def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor):
-
-        self.num_new_scales = num_new_scales
-
-        nh = self.dim//4
-        self.film_controller = nn.Sequential(nn.Linear(self.dim, nh), nn.SiLU())
-
-        self.query_film_generator = nn.ModuleList([
-            nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
-        ])
-
-        self.key_film_generator = nn.ModuleList([
-            nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
-        ])
-
     # def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor):
     #
     #     self.num_new_scales = num_new_scales
     #
-    #     base_len = math.ceil(context_length / patch_size)  # num context patches in base scale
+    #     nh = self.dim//4
+    #     self.film_controller = nn.Sequential(nn.Linear(self.dim, nh), nn.SiLU())
     #
-    #     scale_len = math.ceil(base_len / ds_factor)
     #     self.query_film_generator = nn.ModuleList([
-    #         nn.Linear(in_features=self.dim, out_features=2 * scale_len)
-    #     ])
-    #     self.key_film_generator = nn.ModuleList([
-    #         nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+    #         nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
     #     ])
     #
-    #     for _ in range(1, num_new_scales):
-    #         scale_len = math.ceil(scale_len / ds_factor)
-    #         self.query_film_generator.append(
-    #             nn.Linear(in_features=self.dim, out_features=2 * scale_len)
-    #         )
-    #         self.key_film_generator.append(
-    #             nn.Linear(in_features=self.dim, out_features=2 * scale_len)
-    #         )
+    #     self.key_film_generator = nn.ModuleList([
+    #         nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
+    #     ])
+
+    def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor):
+
+        self.num_new_scales = num_new_scales
+
+        base_len = math.ceil(context_length / patch_size)  # num context patches in base scale
+
+        scale_len = math.ceil(base_len / ds_factor)
+        self.query_film_generator = nn.ModuleList([
+            nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+        ])
+        self.key_film_generator = nn.ModuleList([
+            nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+        ])
+
+        for _ in range(1, num_new_scales):
+            scale_len = math.ceil(scale_len / ds_factor)
+            self.query_film_generator.append(
+                nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+            )
+            self.key_film_generator.append(
+                nn.Linear(in_features=self.dim, out_features=2 * scale_len)
+            )
 
     def _get_var_id(
         self,
@@ -305,7 +305,7 @@ class GroupedQueryAttention(nn.Module):
         key = self.k_proj(key)
         value = self.v_proj(value)
 
-        # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
+        # # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
         # if self.num_new_scales is not None:
         #     index_by_variate = self.get_token_index_by_variate(query_var_id)
         #

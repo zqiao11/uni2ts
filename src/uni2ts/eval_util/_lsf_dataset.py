@@ -83,7 +83,7 @@ class LSFDataset:
         val_length = 2880
         test_length = 2880
         data = self.scale(df[df.columns[1:]], 0, train_length).to_numpy()
-        if self.split == "finetune":
+        if self.split == "train":
             self.data = data[:train_length]
             self.length = train_length
         elif self.split == "val":
@@ -104,7 +104,7 @@ class LSFDataset:
         val_length = 11520
         test_length = 11520
         data = self.scale(df[df.columns[1:]], 0, train_length).to_numpy()
-        if self.split == "finetune":
+        if self.split == "train":
             self.data = data[:train_length]
             self.length = train_length
         elif self.split == "val":
@@ -125,7 +125,7 @@ class LSFDataset:
         test_length = int(len(data) * 0.2)
 
         data = self.scale(data, 0, train_length).to_numpy()
-        if self.split == "finetune":
+        if self.split == "train":
             self.data = data[:train_length]
             self.length = train_length
         elif self.split == "val":
@@ -150,7 +150,7 @@ class LSFDataset:
         test_length = int(len(data) * 0.2)
 
         data = self.scale(data, 0, train_length).to_numpy()
-        if self.split == "finetune":
+        if self.split == "train":
             self.data = data[:train_length]
             self.length = train_length
         elif self.split == "val":
@@ -165,7 +165,7 @@ class LSFDataset:
     def _load_walmart(self):
         df = pd.read_csv(
             os.path.join(
-                env.LSF_PATH, "walmart-recruiting-store-sales-forecasting/finetune.csv"
+                env.LSF_PATH, "walmart-recruiting-store-sales-forecasting/train.csv"
             )
         )
 
@@ -181,7 +181,7 @@ class LSFDataset:
         val_length = 14
         test_length = 28
         data = self.scale(data, 0, train_length)
-        if self.split == "finetune":
+        if self.split == "train":
             self.data = data[:train_length]
             self.length = train_length
         elif self.split == "val":
@@ -205,7 +205,7 @@ class LSFDataset:
         val_length = int(len(data) * 0.1)
         test_length = int(len(data) * 0.2)
         data = self.scale(data, 0, train_length).to_numpy()
-        if self.split == "finetune":
+        if self.split == "train":
             self.data = data[:train_length]
             self.length = train_length
         elif self.split == "val":

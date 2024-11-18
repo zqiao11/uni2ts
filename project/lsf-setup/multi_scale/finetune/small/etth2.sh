@@ -2,14 +2,14 @@
 
 export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
-model=moirai_1.1_R_small
+model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune
 exp_name=lsf
+data=etth2
 cl=3000
+ps=64
 ft_pattern=full
 
-data=etth2
-ps=64
 
 for pl in 96 192 336 720; do
   python -m cli.train \
