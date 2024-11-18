@@ -5,3 +5,4 @@ eval_length: 5269 # Same as _lsf_dataset.py; test_length=10539
 prediction_length: ???
 context_length: ???
 patch_size: ???
+mode: ???

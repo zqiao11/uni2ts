@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: outputs/lsf-setup/lsf/finetune/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${run_name}
+    dir: outputs/lsf-setup/lsf/finetune/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${data.mode}/${run_name}
 defaults:
   - model: ???
   - data: ???

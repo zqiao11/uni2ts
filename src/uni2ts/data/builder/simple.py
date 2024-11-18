@@ -274,6 +274,7 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
     prediction_length: Optional[int]
     context_length: Optional[int]
     patch_size: Optional[int]
+    mode: Optional[str] = 'S'
     storage_path: Path = env.CUSTOM_DATA_PATH
     mean = None
     std = None
@@ -331,16 +332,22 @@ class SimpleFinetuneDatasetBuilder(DatasetBuilder):
             example_gen_func, features=features
         )
         hf_dataset.info.dataset_name = self.dataset
-        hf_dataset.save_to_disk(self.storage_path / 'lsf' / self.dataset)
+        hf_dataset.save_to_disk(self.storage_path / 'lsf' / f'{dataset_type}' / self.dataset)
 
     def load_dataset(
         self, transform_map: dict[str, Callable[..., Transformation]]
     ) -> Dataset:
+
+        if self.mode == 'S':
+            dataset_type = 'wide'
+        elif self.mode == 'M':
+            dataset_type = 'wide_multivariate'
+
         return FinetuneDataset(
             self.windows,
             HuggingFaceDatasetIndexer(
                 datasets.load_from_disk(
-                    str(self.storage_path / 'lsf' / self.dataset),
+                    str(self.storage_path / 'lsf' / f'{dataset_type}' / self.dataset),
                 )
             ),
             transform=transform_map[self.dataset](
@@ -367,6 +374,7 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
     prediction_length: Optional[int]
     context_length: Optional[int]
     patch_size: Optional[int]
+    mode: Optional[str] = 'S'
     storage_path: Path = env.CUSTOM_DATA_PATH
 
     def __post_init__(self):
@@ -402,16 +410,21 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
             example_gen_func, features=features
         )
         hf_dataset.info.dataset_name = self.dataset
-        hf_dataset.save_to_disk(self.storage_path / 'lsf' / self.dataset)
+        hf_dataset.save_to_disk(self.storage_path / 'lsf' / f'{dataset_type}' / self.dataset)
 
     def load_dataset(
         self, transform_map: dict[str, Callable[..., Transformation]]
     ) -> Dataset:
+        if self.mode == 'S':
+            dataset_type = 'wide'
+        elif self.mode == 'M':
+            dataset_type = 'wide_multivariate'
+
         return EvalDataset(
             self.windows,
             HuggingFaceDatasetIndexer(
                 datasets.load_from_disk(
-                    str(self.storage_path / 'lsf' / self.dataset),
+                    str(self.storage_path / 'lsf' / f'{dataset_type}' / self.dataset),
                 )
             ),
             transform=transform_map[self.dataset](
@@ -430,6 +443,7 @@ def generate_finetune_builder(
     prediction_length: int,
     context_length: int,
     patch_size: int,
+    mode: str,
     storage_path: Path = env.CUSTOM_DATA_PATH,
 ) -> SimpleFinetuneDatasetBuilder:
     """
@@ -442,6 +456,7 @@ def generate_finetune_builder(
         prediction_length=prediction_length,
         context_length=context_length,
         patch_size=patch_size,
+        mode=mode,
         storage_path=storage_path,
     )
 
@@ -453,6 +468,7 @@ def generate_eval_builder(
     prediction_length: int,
     context_length: int,
     patch_size: int,
+    mode: str,
     storage_path: Path = env.CUSTOM_DATA_PATH,
 ) -> SimpleEvalDatasetBuilder:
     """
@@ -505,6 +521,7 @@ def generate_eval_builder(
         prediction_length=prediction_length,
         context_length=context_length,
         patch_size=patch_size,
+        mode=mode,
         storage_path=storage_path,
     )
 

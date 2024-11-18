@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: outputs/lsf-setup/multi_scale/finetune/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${run_name}
+    dir: outputs/lsf-setup/multi_scale/finetune/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${data.mode}/${run_name}
 defaults:
   - model: ???
   - data: ???
@@ -40,7 +40,11 @@ trainer:
       mode: min
       strict: false
       verbose: true
-#      warmup_steps: 1
+      #      warmup_steps: 1
+    - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+      dirpath: ${hydra:runtime.output_dir}/checkpoints
+      save_last: true
+      save_weights_only: true
   max_epochs: 1000
   enable_progress_bar: true
   accumulate_grad_batches: 1

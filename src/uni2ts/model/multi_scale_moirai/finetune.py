@@ -132,15 +132,15 @@ class MoiraiFinetune(L.LightningModule):
         self.token_idx_per_scale = self._get_token_idx_per_scale()
 
     def post_init(self):
-        # for layer in self.module.encoder.layers:
-        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-        #         # Call post_init() method of the GroupedQueryAttention object
-        #         layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
+        for layer in self.module.encoder.layers:
+            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+                # Call post_init() method of the GroupedQueryAttention object
+                layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
 
-        for module in self.module.encoder.modules():
-            if isinstance(module, MultiScaleRotaryProjection):
-                module.post_init(self.token_idx_per_scale)
+        # for module in self.module.encoder.modules():
+        #     if isinstance(module, MultiScaleRotaryProjection):
+        #         module.post_init(self.token_idx_per_scale)
 
             # ToDo: Call post_init() method to replace BinaryAttentionBias to CrossVariateAttentionBias
             #   from_pretrained的Pipeline是什么？先init,再load? 然后load不了的参数自动忽略？如果是这样就不用加post_init
@@ -324,6 +324,12 @@ class MoiraiFinetune(L.LightningModule):
             if "film" in pn:
                 p.requires_grad = True
 
+            if "adapt_weight" in pn:
+                p.requires_grad = True
+
+            if "adapt_bias" in pn:
+                p.requires_grad = True
+
             if "var_attn_bias.emb" in pn:
                 p.requires_grad = True
 
@@ -417,6 +423,8 @@ class MoiraiFinetune(L.LightningModule):
                     decay.add(fpn)
                 elif pn.endswith("weight") and isinstance(m, blacklist_params):
                     no_decay.add(fpn)
+                elif "adapt_weight" in pn or "adapt_bias" in pn:
+                    decay.add(fpn)
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
