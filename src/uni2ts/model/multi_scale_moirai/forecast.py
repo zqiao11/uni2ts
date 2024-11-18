@@ -128,15 +128,15 @@ class MoiraiForecast(L.LightningModule):
 
 
     def post_init(self):
-        # for layer in self.module.encoder.layers:
-        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-        #         # Call post_init() method of the GroupedQueryAttention object
-        #         layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
+        for layer in self.module.encoder.layers:
+            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+                # Call post_init() method of the GroupedQueryAttention object
+                layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
 
-        for module in self.module.encoder.modules():
-            if isinstance(module, MultiScaleRotaryProjection):
-                module.post_init(self.token_idx_per_scale)
+        # for module in self.module.encoder.modules():
+        #     if isinstance(module, MultiScaleRotaryProjection):
+        #         module.post_init(self.token_idx_per_scale)
 
 
     def _get_token_idx_per_scale(self):

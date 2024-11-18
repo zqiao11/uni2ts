@@ -33,6 +33,9 @@ trainer:
       mode: min
       save_top_k: 1  # Qz: Sometimes the 1st validation gets anomalous results. Discard that ckpt, and use the 2nd one.
       every_n_epochs: 1
+    - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+      dirpath: ${hydra:runtime.output_dir}/checkpoints
+      save_weights_only: true
     - _target_: lightning.pytorch.callbacks.EarlyStopping # uni2ts.callbacks.earlystop.WarmupEarlyStopping
       monitor: val/PackedNLLLoss
       min_delta: 0.0
@@ -41,10 +44,6 @@ trainer:
       strict: false
       verbose: true
       #      warmup_steps: 1
-    - _target_: lightning.pytorch.callbacks.ModelCheckpoint
-      dirpath: ${hydra:runtime.output_dir}/checkpoints
-      save_last: true
-      save_weights_only: true
   max_epochs: 1000
   enable_progress_bar: true
   accumulate_grad_batches: 1
