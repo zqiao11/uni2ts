@@ -128,6 +128,8 @@ class MoiraiForecast(L.LightningModule):
 
 
     def post_init(self):
+
+
         for layer in self.module.encoder.layers:
             # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
             if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):

@@ -1,18 +1,18 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=2
 
 mode=S
 cp=conf/lsf-setup/multi_scale/eval
 exp_name=lsf
-cl=3000
+cl=2000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/origin/moirai_1.1_R_small/lsf/full/weather/cl3000_pl96/checkpoints/epoch_2-step_300.ckpt'
-cpp2='./outputs/origin/moirai_1.1_R_small/lsf/full/weather/cl3000_pl192/checkpoints/epoch_2-step_300.ckpt'
-cpp3='./outputs/origin/moirai_1.1_R_small/lsf/full/weather/cl3000_pl336/checkpoints/epoch_2-step_300.ckpt'
-cpp4='./outputs/origin/moirai_1.1_R_small/lsf/full/weather/cl3000_pl720/checkpoints/epoch_2-step_300.ckpt'
+cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_1.0/full/weather/S/cl2000_pl96/checkpoints/epoch_10-step_15708.ckpt'
+cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_1.0/full/weather/S/cl2000_pl192/checkpoints/epoch_7-step_11392.ckpt'
+cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_1.0/full/weather/S/cl2000_pl336/checkpoints/epoch_4-step_7090.ckpt'
+cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_1.0/full/weather/S/cl2000_pl720/checkpoints/epoch_2-step_4206.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

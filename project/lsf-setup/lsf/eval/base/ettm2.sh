@@ -6,19 +6,19 @@ export CUDA_VISIBLE_DEVICES=0
 cp=conf/lsf-setup/lsf/eval
 exp_name=lsf
 model=moirai_lightning_ckpt
-data=weather
-cl=2000
+data=ETTm2
+cl=5000
 ps=128
 mode=S
 
 
-cpp1='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl96/checkpoints/epoch_22-step_16422.ckpt'
-cpp2='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl192/checkpoints/epoch_17-step_12816.ckpt'
-cpp3='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl336/checkpoints/epoch_11-step_8508.ckpt'
-cpp4='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl720/checkpoints/epoch_8-step_6309.ckpt'
+cpp1='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm2/cl3000_pl96/checkpoints/epoch_12-step_2808.ckpt'
+cpp2='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm2/cl3000_pl192/checkpoints/epoch_4-step_1075.ckpt'
+cpp3='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm2/cl3000_pl336/checkpoints/epoch_2-step_642.ckpt'
+cpp4='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm2/cl3000_pl720/checkpoints/epoch_1-step_422.ckpt'
 
 index=1
-for pl in 96 192 336 720 ; do
+for pl in 96 192 336 720; do
   case $index in
     1) cpp=$cpp1 ;;
     2) cpp=$cpp2 ;;

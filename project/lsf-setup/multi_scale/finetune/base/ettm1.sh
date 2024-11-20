@@ -5,10 +5,10 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune
 exp_name=ms_qkv_1.0
-data=weather
-cl=2000
-ps=128
-mode=S  # M
+data=ettm1
+cl=5000
+ps=64
+mode=S
 ft_pattern=full
 
 

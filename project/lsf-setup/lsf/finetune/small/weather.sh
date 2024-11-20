@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/lsf/finetune
@@ -8,11 +8,11 @@ exp_name=lsf
 data=weather
 cl=2000
 ps=128
-mode=M
+mode=S  # M
 ft_pattern=full
 
 
-for pl in 96 192 336 720; do
+for pl in 720; do  # 96 192 336
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \

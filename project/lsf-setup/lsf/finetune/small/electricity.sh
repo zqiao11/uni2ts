@@ -12,7 +12,7 @@ mode=S
 ft_pattern=full
 
 
-for pl in 96 192 336 720; do
+for pl in 192 336 720; do   # 96
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \

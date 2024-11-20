@@ -353,10 +353,10 @@ class GroupedQueryAttention(nn.Module):
                 index = index_by_variate[scale + 1]
                 query_scale = init_query[..., index, :]  # (bs, num_patch_new_scale, dim)
                 query[..., index, :] = self.query_adapt_weight[scale] * query_scale + self.query_adapt_bias[scale]
-                
+
                 key_scale = init_key[..., index, :]  # (bs, num_patch_new_scale, dim)
                 key[..., index, :] = self.key_adapt_weight[scale] * key_scale + self.key_adapt_bias[scale]
-                
+
                 value_scale = init_value[..., index, :]  # (bs, num_patch_new_scale, dim)
                 value[..., index, :] = self.value_adapt_weight[scale] * value_scale + self.value_adapt_bias[scale]
 

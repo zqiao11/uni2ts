@@ -139,8 +139,8 @@ def main(cfg: DictConfig):
     trainer: L.Trainer = instantiate(cfg.trainer)
 
     # '=' in ckpt name make it cannot be directly loaded with hydra. Change it to '_'.
-    trainer.callbacks[1].CHECKPOINT_EQUALS_CHAR = "_"
-    trainer.callbacks[2].CHECKPOINT_EQUALS_CHAR = "_"
+    trainer.callbacks[-1].CHECKPOINT_EQUALS_CHAR = "_"
+    trainer.callbacks[-2].CHECKPOINT_EQUALS_CHAR = "_"
 
     train_dataset: Dataset = instantiate(cfg.data).load_dataset(
         model.train_transform_map

@@ -6,7 +6,7 @@ export CUDA_VISIBLE_DEVICES=0
 mode=S
 cp=conf/lsf-setup/multi_scale/eval
 exp_name=lsf
-cl=3000
+cl=5000
 model=moirai_lightning_ckpt
 
 

@@ -2,13 +2,13 @@
 
 export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
-model=moirai_1.0_R_small
-cp=conf/lsf-setup/multi_scale/finetune
-exp_name=ms_qkv_1.0
-data=weather
-cl=2000
-ps=128
-mode=S  # M
+model=moirai_1.0_R_base
+cp=conf/lsf-setup/lsf/finetune
+exp_name=lsf
+data=electricity
+cl=5000
+ps=32
+mode=S
 ft_pattern=full
 
 
@@ -31,5 +31,6 @@ for pl in 96 192 336 720; do
   val_data.patch_size=${ps} \
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
-  val_data.mode=${mode}
+  val_data.mode=${mode} \
+  model.lr=5e-6
 done

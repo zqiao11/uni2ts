@@ -8,7 +8,7 @@ exp_name=lsf
 data=etth2
 cl=3000
 ps=64
-mode=M
+mode=S
 ft_pattern=full
 
 

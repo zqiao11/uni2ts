@@ -1,11 +1,11 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 mode=S
 cp=conf/lsf-setup/multi_scale/eval
-exp_name=lsf_zero_shot
-model=moirai_1.0_R_small
+exp_name=ms_direct_zero_shot
+model=moirai_1.1_R_small
 
 
 #for pl in 96 192 336 720; do
@@ -36,21 +36,21 @@ model=moirai_1.0_R_small
 #done
 
 
-for pl in 96 192 336 720; do
-  python -m cli.eval \
-    -cp $cp \
-    exp_name=$exp_name \
-    model=$model \
-    model.patch_size=128 \
-    model.context_length=4000 \
-    data=lsf_test \
-    data.dataset_name=ETTm1 \
-    data.mode=S \
-    data.prediction_length=$pl
-done
+#for pl in 96 192 336 720; do
+#  python -m cli.eval \
+#    -cp $cp \
+#    exp_name=$exp_name \
+#    model=$model \
+#    model.patch_size=128 \
+#    model.context_length=4000 \
+#    data=lsf_test \
+#    data.dataset_name=ETTm1 \
+#    data.mode=S \
+#    data.prediction_length=$pl
+#done
 
 
-for pl in 96 192 336 720; do
+for pl in 96 ; do  # 192 336 720
   python -m cli.eval \
     -cp $cp \
     exp_name=$exp_name \

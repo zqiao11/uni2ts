@@ -7,7 +7,7 @@ cp=conf/lsf-setup/lsf/eval
 exp_name=lsf
 model=moirai_lightning_ckpt
 data=weather
-cl=2000
+cl=5000
 ps=128
 mode=S
 

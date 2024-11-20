@@ -6,7 +6,7 @@ export CUDA_VISIBLE_DEVICES=3
 mode=S
 cp=conf/lsf-setup/multi_scale/eval
 exp_name=lsf
-cl=3000
+cl=5000
 model=moirai_lightning_ckpt
 
 cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.1_R_small/ms_qkv_1.1_ctx3000/full/ettm2/S/cl3000_pl96/checkpoints/epoch_4-step_2155.ckpt'
@@ -30,7 +30,7 @@ for pl in 96 192 336 720; do
     -cp $cp \
     exp_name=$exp_name/$pretrained_model/$ft_pattern  \
     model=$model \
-    model.patch_size=64 \
+    model.patch_size=128 \
     model.context_length=$cl \
     model.checkpoint_path=$cpp \
     model.pretrained_checkpoint_path=ckpt/$pretrained_model.ckpt \
