@@ -41,6 +41,8 @@ from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
 
 from .module import MoiraiModule
 
+from peft import LoraConfig, LoraModel
+
 
 class SampleNLLLoss(_PackedNLLLoss):
     def reduce_loss(
@@ -83,6 +85,8 @@ class MoiraiForecast(L.LightningModule):
         patch_size: int | str = "auto",
         num_samples: int = 100,
         pretrained_checkpoint_path: str = None,
+        use_lora: bool = False,
+        lora_kwargs: Optional[dict[str, Any]] = None,
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -92,6 +96,11 @@ class MoiraiForecast(L.LightningModule):
         self.module = MoiraiModule(**module_kwargs) if module is None else module
         self.per_sample_loss_func = SampleNLLLoss()
         self.strict_loading = False
+
+        # Set Lora for Moirai
+        if use_lora:
+            self.lora_config = LoraConfig(**lora_kwargs)
+            self.module = LoraModel(self.module, self.lora_config, "default")
 
     @contextmanager
     def hparams_context(

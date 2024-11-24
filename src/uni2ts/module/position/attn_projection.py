@@ -134,42 +134,36 @@ class MultiScaleRotaryProjection(Projection):
             ),
             persistent=False,
         )
-
+        self.register_buffer("cos", None, persistent=False)
+        self.register_buffer("sin", None, persistent=False)
+        self._init_freq(max_len=max_len)
 
         self.max_len = max_len
+
+        self.pe_weights = nn.ParameterList([])
 
 
     def post_init(self, token_idx_per_scale):
         self.token_idx_per_scale = token_idx_per_scale
         self.num_scales = len(token_idx_per_scale)
 
-        for i in range(self.num_scales):
-            self.register_buffer(f"cos{i}", None, persistent=False)
-            self.register_buffer(f"sin{i}", None, persistent=False)
-        self._init_freq(max_len=self.max_len)
+        for i in range(1, self.num_scales):
+            weight = nn.Parameter(
+                torch.empty((self.max_len, self.proj_width, self.proj_width)), requires_grad=True
+            )
+            for idx in range(self.max_len):
+                nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
+            self.pe_weights.append(weight)
 
     def _init_freq(self, max_len: int):
-
-        for i in range(self.num_scales):
-
-            if i == 0:
-                position = torch.arange(
-                    max_len, device=self.theta.device, dtype=self.theta.dtype
-                )
-                m_theta = einsum(position, self.theta, "length, width -> length width")
-                m_theta = repeat(m_theta, "length width -> length (width 2)")
-                self.register_buffer("cos0", torch.cos(m_theta), persistent=False)
-                self.register_buffer("sin0", torch.sin(m_theta), persistent=False)
-
-            else:
-                start, step = sum(list(range(0, 2**i))) / 2**i, 2*i
-                position = torch.arange(
-                    start=start, end=max_len, step=step, device=self.theta.device, dtype=self.theta.dtype
-                )
-                m_theta = einsum(position, self.theta, "length, width -> length width")
-                m_theta = repeat(m_theta, "length width -> length (width 2)")
-                self.register_buffer(f"cos{i}", torch.cos(m_theta), persistent=False)
-                self.register_buffer(f"sin{i}", torch.sin(m_theta), persistent=False)
+        if self.cos is None or self.cos.size(-2) < max_len:
+            position = torch.arange(
+                max_len, device=self.theta.device, dtype=self.theta.dtype
+            )
+            m_theta = einsum(position, self.theta, "length, width -> length width")
+            m_theta = repeat(m_theta, "length width -> length (width 2)")
+            self.register_buffer("cos", torch.cos(m_theta), persistent=False)  # (512, 32)
+            self.register_buffer("sin", torch.sin(m_theta), persistent=False)
 
     @staticmethod
     def _rotate(x: Float[torch.Tensor, "... dim"]) -> Float[torch.Tensor, "... dim"]:
@@ -182,20 +176,111 @@ class MultiScaleRotaryProjection(Projection):
         seq_id: Optional[Int[torch.Tensor, "*batch #group #hpg seq"]],
     ) -> Float[torch.Tensor, "*batch group hpg seq dim"]:
 
-        # if self.token_idx_per_scale is None:
-        #     self.token_idx_per_scale = self.get_token_index_by_variate(variate_id)
-
-        
         out = torch.empty_like(x, device=x.device, dtype=x.dtype)
         
         for i in range(self.num_scales):
             idx_scale_i = self.token_idx_per_scale[i]
-            
-            rot_cos = getattr(self, f"cos{i}")[seq_id[..., :, :, idx_scale_i]]
-            rot_sin = getattr(self, f"sin{i}")[seq_id[..., :, :, idx_scale_i]]
-            out[..., :, :, idx_scale_i, :] = rot_cos * x[..., :, :, idx_scale_i, :] + rot_sin * self._rotate(x[..., :, :, idx_scale_i, :])
+
+            if i == 0:
+                rot_cos = self.cos[seq_id[..., :, :, idx_scale_i]]  # (32, 1, 1, 46, 32)
+                rot_sin = self.sin[seq_id[..., :, :, idx_scale_i]]
+                out[..., :, :, idx_scale_i, :] = rot_cos * x[..., :, :, idx_scale_i, :] + rot_sin * self._rotate(
+                    x[..., :, :, idx_scale_i, :])
+
+            else:
+                weight = self.pe_weights[i-1][seq_id[..., :, :, idx_scale_i]]
+                out[..., :, :, idx_scale_i, :] = einsum(weight, x[..., :, :, idx_scale_i, :], "... out inp, ... inp -> ... out")
+
             
         return out  # QZ: Eq 34 in the paper
+
+
+# class MultiScaleRotaryProjection(Projection):
+#     def __init__(
+#             self,
+#             *,
+#             proj_width: int,
+#             num_heads: int,
+#             num_groups: int,
+#             max_len: int = 512,
+#             base: int = 10000,
+#             token_idx_per_scale: Optional[list] = None  # ToDo: list of time index of each scale [[], [], []]
+#     ):
+#         super().__init__(proj_width, num_heads, num_groups)
+#
+#         self.token_idx_per_scale = token_idx_per_scale
+#
+#         assert (
+#                 self.proj_width % 2 == 0
+#         ), f"proj_width must be even, got {self.proj_width}"
+#         self.register_buffer(  # QZ: Eq 15
+#             "theta",
+#             1.0
+#             / torch.pow(
+#                 base,
+#                 torch.arange(0, self.proj_width, 2, dtype=torch.float)
+#                 / self.proj_width,
+#             ),
+#             persistent=False,
+#         )
+#
+#         self.max_len = max_len
+#
+#     def post_init(self, token_idx_per_scale):
+#         self.token_idx_per_scale = token_idx_per_scale
+#         self.num_scales = len(token_idx_per_scale)
+#
+#         for i in range(self.num_scales):
+#             self.register_buffer(f"cos{i}", None, persistent=False)
+#             self.register_buffer(f"sin{i}", None, persistent=False)
+#         self._init_freq(max_len=self.max_len)
+#
+#     def _init_freq(self, max_len: int):
+#
+#         for i in range(self.num_scales):
+#
+#             if i == 0:
+#                 position = torch.arange(
+#                     max_len, device=self.theta.device, dtype=self.theta.dtype
+#                 )
+#                 m_theta = einsum(position, self.theta, "length, width -> length width")
+#                 m_theta = repeat(m_theta, "length width -> length (width 2)")
+#                 self.register_buffer("cos0", torch.cos(m_theta), persistent=False)
+#                 self.register_buffer("sin0", torch.sin(m_theta), persistent=False)
+#
+#             else:
+#                 start, step = sum(list(range(0, 2 ** i))) / 2 ** i, 2 * i
+#                 position = torch.arange(
+#                     start=start, end=max_len, step=step, device=self.theta.device, dtype=self.theta.dtype
+#                 )
+#                 m_theta = einsum(position, self.theta, "length, width -> length width")
+#                 m_theta = repeat(m_theta, "length width -> length (width 2)")
+#                 self.register_buffer(f"cos{i}", torch.cos(m_theta), persistent=False)
+#                 self.register_buffer(f"sin{i}", torch.sin(m_theta), persistent=False)
+#
+#     @staticmethod
+#     def _rotate(x: Float[torch.Tensor, "... dim"]) -> Float[torch.Tensor, "... dim"]:
+#         x1, x2 = rearrange(x, "... (dim r) -> r ... dim", r=2)
+#         return rearrange([-x2, x1], "r ... dim -> ... (dim r)", r=2)  # noqa
+#
+#     def forward(
+#             self,
+#             x: Float[torch.Tensor, "*batch group hpg seq dim"],
+#             seq_id: Optional[Int[torch.Tensor, "*batch #group #hpg seq"]],
+#     ) -> Float[torch.Tensor, "*batch group hpg seq dim"]:
+#
+#         out = torch.empty_like(x, device=x.device, dtype=x.dtype)
+#
+#         for i in range(self.num_scales):
+#             idx_scale_i = self.token_idx_per_scale[i]
+#
+#             rot_cos = getattr(self, f"cos{i}")[seq_id[..., :, :, idx_scale_i]]
+#             rot_sin = getattr(self, f"sin{i}")[seq_id[..., :, :, idx_scale_i]]
+#             out[..., :, :, idx_scale_i, :] = rot_cos * x[..., :, :, idx_scale_i, :] + rot_sin * self._rotate(
+#                 x[..., :, :, idx_scale_i, :])
+#
+#         return out  # QZ: Eq 34 in the paper
+
 
 class LearnedProjection(Projection):
     def __init__(

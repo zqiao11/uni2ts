@@ -39,3 +39,11 @@ patch_size: null
 context_length: null
 prediction_length: null
 finetune_pattern: full
+
+use_lora: False
+lora_kwargs:
+  _target_: builtins.dict
+  r: 16
+  target_modules: ["q_proj", "k_proj", "v_proj"]
+  lora_alpha: 32
+  lora_dropout: 0.05

@@ -12,10 +12,10 @@ ps=64
 mode=S
 
 
-cpp1=''
-cpp2=''
-cpp3=''
-cpp4=''
+cpp1='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/electricity/S/cl5000_pl96/checkpoints/epoch_13-step_58450.ckpt'
+cpp2='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/electricity/S/cl5000_pl192/checkpoints/epoch_7-step_33160.ckpt'
+cpp3='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/electricity/S/cl5000_pl336/checkpoints/epoch_6-step_28700.ckpt'
+cpp4='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/electricity/S/cl5000_pl720/checkpoints/epoch_2-step_11937.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

@@ -332,33 +332,33 @@ class GroupedQueryAttention(nn.Module):
         query_time_id: Optional[Int[torch.Tensor, "*batch q_len"]] = None,
         kv_time_id: Optional[Int[torch.Tensor, "*batch kv_len"]] = None,
     ) -> Float[torch.Tensor, "*batch q_len dim"]:
-        # query = self.q_proj(query)
-        # key = self.k_proj(key)
-        # value = self.v_proj(value)
+        query = self.q_proj(query)
+        key = self.k_proj(key)
+        value = self.v_proj(value)
 
-        init_query = self.q_proj(query)
-        init_key = self.k_proj(key)
-        init_value = self.v_proj(value)
-
-        query = init_query.clone()
-        key = init_key.clone()
-        value = init_value.clone()
-
-        # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
-        if self.num_new_scales is not None:
-            index_by_variate = self.get_token_index_by_variate(query_var_id)
-
-            for scale in range(self.num_new_scales):
-                assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
-                index = index_by_variate[scale + 1]
-                query_scale = init_query[..., index, :]  # (bs, num_patch_new_scale, dim)
-                query[..., index, :] = self.query_adapt_weight[scale] * query_scale + self.query_adapt_bias[scale]
-
-                key_scale = init_key[..., index, :]  # (bs, num_patch_new_scale, dim)
-                key[..., index, :] = self.key_adapt_weight[scale] * key_scale + self.key_adapt_bias[scale]
-
-                value_scale = init_value[..., index, :]  # (bs, num_patch_new_scale, dim)
-                value[..., index, :] = self.value_adapt_weight[scale] * value_scale + self.value_adapt_bias[scale]
+        # init_query = self.q_proj(query)
+        # init_key = self.k_proj(key)
+        # init_value = self.v_proj(value)
+        #
+        # query = init_query.clone()
+        # key = init_key.clone()
+        # value = init_value.clone()
+        #
+        # # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
+        # if self.num_new_scales is not None:
+        #     index_by_variate = self.get_token_index_by_variate(query_var_id)
+        #
+        #     for scale in range(self.num_new_scales):
+        #         assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
+        #         index = index_by_variate[scale + 1]
+        #         query_scale = init_query[..., index, :]  # (bs, num_patch_new_scale, dim)
+        #         query[..., index, :] = self.query_adapt_weight[scale] * query_scale + self.query_adapt_bias[scale]
+        #
+        #         key_scale = init_key[..., index, :]  # (bs, num_patch_new_scale, dim)
+        #         key[..., index, :] = self.key_adapt_weight[scale] * key_scale + self.key_adapt_bias[scale]
+        #
+        #         value_scale = init_value[..., index, :]  # (bs, num_patch_new_scale, dim)
+        #         value[..., index, :] = self.value_adapt_weight[scale] * value_scale + self.value_adapt_bias[scale]
 
 
 

@@ -134,7 +134,7 @@ class MoiraiModule(
                 partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
             ),
             shared_var_attn_bias=False,
-            shared_time_qk_proj=True,
+            shared_time_qk_proj=True,   # True by default
             d_ff=None,
         )
         self.distr_output = distr_output

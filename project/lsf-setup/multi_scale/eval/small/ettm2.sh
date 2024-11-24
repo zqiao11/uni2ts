@@ -1,7 +1,7 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=1
 
 mode=S
 cp=conf/lsf-setup/multi_scale/eval
@@ -9,10 +9,10 @@ exp_name=lsf
 cl=3000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.1_R_small/ms_qkv_1.1_ctx3000/full/ettm2/S/cl3000_pl96/checkpoints/epoch_4-step_2155.ckpt'
-cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.1_R_small/ms_qkv_1.1_ctx3000/full/ettm2/S/cl3000_pl192/checkpoints/epoch_2-step_1287.ckpt'
-cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.1_R_small/ms_qkv_1.1_ctx3000/full/ettm2/S/cl3000_pl336/checkpoints/epoch_0-step_427.ckpt'
-cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.1_R_small/ms_qkv_1.1_ctx3000/full/ettm2/S/cl3000_pl720/checkpoints/epoch_0-step_422.ckpt'
+cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_new_scale_learned_pe/full/ettm2/S/cl3000_pl96/checkpoints/epoch_5-step_2586.ckpt'
+cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_new_scale_learned_pe/full/ettm2/S/cl3000_pl192/checkpoints/epoch_1-step_858.ckpt'
+cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_new_scale_learned_pe/full/ettm2/S/cl3000_pl336/checkpoints/epoch_0-step_427.ckpt'
+cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_new_scale_learned_pe/full/ettm2/S/cl3000_pl720/checkpoints/epoch_0-step_422.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

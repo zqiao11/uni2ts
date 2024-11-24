@@ -50,6 +50,7 @@ from uni2ts.module.position import (
     MultiScaleRotaryProjection
 )
 
+from peft import LoraConfig, LoraModel
 
 
 class SampleNLLLoss(_PackedNLLLoss):
@@ -108,6 +109,8 @@ class MoiraiForecast(L.LightningModule):
         pretrained_checkpoint_path: str = None,
         num_new_scales: int = 1,
         ds_factor: int = 2,
+        use_lora: bool = False,
+        lora_kwargs: Optional[dict[str, Any]] = None,
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -123,22 +126,32 @@ class MoiraiForecast(L.LightningModule):
 
         self.token_idx_per_scale = self._get_token_idx_per_scale()
 
+        # Set Lora for Moirai
+        if use_lora:
+            self.lora_config = LoraConfig(**lora_kwargs)
+            self.module = LoraModel(self.module, self.lora_config, "default")
+
+
         self.post_init()   # ToDO: Make it optional.
 
 
 
     def post_init(self):
+        """
+        Initialize the new params added for Multi Scale.
+        """
 
-
-        for layer in self.module.encoder.layers:
-            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-                # Call post_init() method of the GroupedQueryAttention object
-                layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
+        # for layer in self.module.encoder.layers:
+        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+        #         # Call post_init() method of the GroupedQueryAttention object
+        #         layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
 
         # for module in self.module.encoder.modules():
         #     if isinstance(module, MultiScaleRotaryProjection):
         #         module.post_init(self.token_idx_per_scale)
+
+        pass
 
 
     def _get_token_idx_per_scale(self):

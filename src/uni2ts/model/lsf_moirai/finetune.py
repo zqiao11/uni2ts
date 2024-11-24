@@ -25,7 +25,6 @@ from jaxtyping import Bool, Float, Int
 from torch import nn
 from torch.distributions import Distribution
 
-from uni2ts.distribution import StudentTOutput
 from uni2ts.loss.packed import (
     PackedDistributionLoss,
     PackedLoss,
@@ -73,6 +72,8 @@ from uni2ts.transform import (
 from .module import MoiraiModule
 
 from uni2ts.module.multi_scale.attention import GroupedQueryAttention
+from peft import LoraConfig, LoraModel
+
 
 class MoiraiFinetune(L.LightningModule):
     seq_fields: tuple[str, ...] = (
@@ -114,6 +115,9 @@ class MoiraiFinetune(L.LightningModule):
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
+        use_lora: bool = False,
+        lora_kwargs: Optional[dict[str, Any]] = None,
+
         # full
         # in_proj
         # param_proj
@@ -142,28 +146,33 @@ class MoiraiFinetune(L.LightningModule):
         self.dropout_p = module_kwargs["dropout_p"]
         self.attn_dropout_p = module_kwargs["attn_dropout_p"]
 
-    def post_init(self):
-        if self.dropout_p > 0:
-            # for module in self.module.modules():
-            #     if isinstance(module, torch.nn.Dropout):
-            #         module.p = self.dropout_p
+        # Lora config
+        self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
 
+    def post_init(self):
+        # Note: Only set 'post_attn_dp'. The performance decreases when using dp in FFN.
+        if self.dropout_p > 0:
             for name, module in self.module.named_modules():
                 if isinstance(module, torch.nn.Dropout) and name.endswith('dropout'):
                     module.p = self.dropout_p
                     print(f"Set p of {name} to {self.dropout_p}")
-
-            # for name, module in self.module.named_modules():
-            #     if isinstance(module, torch.nn.Dropout) and any(
-            #             name.endswith(suffix) for suffix in ['dropout1', 'dropout2']):
-            #         module.p = self.dropout_p
-            #         print(f"Set p of {name} to {self.dropout_p}")
-
+        # Note: The performance decreases when using attn_dropout_p.
         if self.attn_dropout_p > 0:
             for module in self.module.modules():
                 if isinstance(module, GroupedQueryAttention):
                     module.attn_dropout_p = self.attn_dropout_p
 
+        if self.lora_config is not None:
+            self.module = LoraModel(self.module, self.lora_config, "default")
+            # Params not used in Lora are set as requires_grad=False automatically.
+            # Activate some of those params manually. FFN and out_proj are kept as frozen.
+            for pn, p in self.named_parameters():
+                if "param_proj" in pn or "in_proj" in pn:
+                    p.requires_grad = True
+                if "norm" in pn:
+                    p.requires_grad = True
+                if "mask_encoding" in pn or "var_attn_bias" in pn:
+                    p.requires_grad = True
 
     def forward(
         self,
@@ -298,168 +307,9 @@ class MoiraiFinetune(L.LightningModule):
 
         return val_loss
 
-    # def configure_optimizers(self) -> dict:
-    #     decay = set()
-    #     no_decay = set()
-    #
-    #     if "full" in self.finetune_pattern:
-    #         if "wo_head" in self.finetune_pattern:
-    #             for pn, p in self.named_parameters():
-    #                 if "param_proj" in pn:
-    #                     p.requires_grad = False
-    #         pass
-    #     else:
-    #         for param in self.parameters():
-    #             param.requires_grad = False
-    #
-    #     # Unfreeze the corresponding params
-    #     if "param_proj" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "param_proj" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "in_proj" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "in_proj" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "norm" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "norm1" in pn or "norm2" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "mask" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "mask_encoding" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "ffn" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "ffn" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "q_proj" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "q_proj" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "k_proj" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "k_proj" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "v_proj" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "v_proj" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "attn_norm" in self.finetune_pattern:  #
-    #         for pn, p in self.named_parameters():
-    #             if "self_attn.q_norm" in pn or "self_attn.k_norm" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "var_attn_bias" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "var_attn_bias" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "out_proj" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if "out_proj" in pn:
-    #                 p.requires_grad = True
-    #
-    #     if "studentT" in self.finetune_pattern:
-    #         for pn, p in self.named_parameters():
-    #             if (
-    #                 "param_proj.proj.components.0" in pn
-    #                 or "param_proj.proj.weights_logits" in pn
-    #             ):
-    #                 p.requires_grad = True
-    #
-    #     whitelist_params = (
-    #         LearnedProjection,
-    #         MultiInSizeLinear,
-    #         MultiOutSizeLinear,
-    #         nn.Linear,
-    #     )
-    #     blacklist_params = (
-    #         BinaryAttentionBias,
-    #         LearnedEmbedding,
-    #         RMSNorm,
-    #         nn.Embedding,
-    #         nn.LayerNorm,
-    #     )
-    #
-    #     for mn, m in self.named_modules():
-    #         for pn, p in m.named_parameters():
-    #             if not p.requires_grad:
-    #                 continue
-    #
-    #             fpn = f"{mn}.{pn}" if mn else pn
-    #             if pn.endswith("bias"):
-    #                 no_decay.add(fpn)
-    #             elif pn.endswith("weight") and isinstance(m, whitelist_params):
-    #                 decay.add(fpn)
-    #             elif pn.endswith("weight") and isinstance(m, blacklist_params):
-    #                 no_decay.add(fpn)
-    #
-    #     # validate that we considered every parameter
-    #     param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
-    #     self.trainable_params = param_dict
-    #
-    #     inter_params = decay & no_decay
-    #     union_params = decay | no_decay
-    #     assert (
-    #         len(inter_params) == 0
-    #     ), f"parameters {str(inter_params)} made it into both decay/no_decay sets!"
-    #     assert (
-    #         len(param_dict.keys() - union_params) == 0
-    #     ), f"parameters {str(param_dict.keys() - union_params)} were not separated into either decay/no_decay set!"
-    #
-    #     optim_groups = [
-    #         {
-    #             "params": filter(
-    #                 lambda p: p.requires_grad,
-    #                 [param_dict[pn] for pn in sorted(list(decay))],
-    #             ),
-    #             "weight_decay": self.hparams.weight_decay,
-    #         },
-    #         {
-    #             "params": filter(
-    #                 lambda p: p.requires_grad,
-    #                 [param_dict[pn] for pn in sorted(list(no_decay))],
-    #             ),
-    #             "weight_decay": 0.0,
-    #         },
-    #     ]
-    #
-    #     optimizer = torch.optim.AdamW(
-    #         optim_groups,
-    #         lr=self.hparams.lr,
-    #         betas=(self.hparams.beta1, self.hparams.beta2),
-    #         eps=1e-6,
-    #     )
-    #     scheduler = get_scheduler(
-    #         SchedulerType.CONSTANT,  # Use constant lr scheduler
-    #         optimizer,
-    #         num_warmup_steps=self.hparams.num_warmup_steps,
-    #         num_training_steps=self.hparams.num_training_steps,
-    #     )
-    #     return {
-    #         "optimizer": optimizer,
-    #         "lr_scheduler": {
-    #             "scheduler": scheduler,
-    #             "monitor": "train_loss",
-    #             "interval": "step",
-    #         },
-    #     }
-
-
     def configure_optimizers(self) -> dict:
-        encoder_decay = set()
-        encoder_no_decay = set()
-        head_decay = set()
-        head_no_decay = set()
+        decay = set()
+        no_decay = set()
 
         if "full" in self.finetune_pattern:
             if "wo_head" in self.finetune_pattern:
@@ -555,29 +405,19 @@ class MoiraiFinetune(L.LightningModule):
                     continue
 
                 fpn = f"{mn}.{pn}" if mn else pn
-
-                if "param_proj" in fpn:
-                    if pn.endswith("bias"):
-                        head_no_decay.add(fpn)
-                    elif pn.endswith("weight") and isinstance(m, whitelist_params):
-                        head_decay.add(fpn)
-                    elif pn.endswith("weight") and isinstance(m, blacklist_params):
-                        head_no_decay.add(fpn)
-
-                else:
-                    if pn.endswith("bias"):
-                        encoder_no_decay.add(fpn)
-                    elif pn.endswith("weight") and isinstance(m, whitelist_params):
-                        encoder_decay.add(fpn)
-                    elif pn.endswith("weight") and isinstance(m, blacklist_params):
-                        encoder_no_decay.add(fpn)
+                if pn.endswith("bias"):
+                    no_decay.add(fpn)
+                elif pn.endswith("weight") and isinstance(m, whitelist_params):
+                    decay.add(fpn)
+                elif pn.endswith("weight") and isinstance(m, blacklist_params):
+                    no_decay.add(fpn)
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
         self.trainable_params = param_dict
 
-        inter_params = encoder_decay & encoder_no_decay & head_decay & head_no_decay
-        union_params = encoder_decay | encoder_no_decay | head_decay | head_no_decay
+        inter_params = decay & no_decay
+        union_params = decay | no_decay
         assert (
             len(inter_params) == 0
         ), f"parameters {str(inter_params)} made it into both decay/no_decay sets!"
@@ -589,40 +429,22 @@ class MoiraiFinetune(L.LightningModule):
             {
                 "params": filter(
                     lambda p: p.requires_grad,
-                    [param_dict[pn] for pn in sorted(list(encoder_decay))],
+                    [param_dict[pn] for pn in sorted(list(decay))],
                 ),
-                "lr": self.hparams.lr,
                 "weight_decay": self.hparams.weight_decay,
             },
             {
                 "params": filter(
                     lambda p: p.requires_grad,
-                    [param_dict[pn] for pn in sorted(list(encoder_no_decay))],
+                    [param_dict[pn] for pn in sorted(list(no_decay))],
                 ),
-                "lr": self.hparams.lr,
-                "weight_decay": 0.0,
-            },
-            {
-                "params": filter(
-                    lambda p: p.requires_grad,
-                    [param_dict[pn] for pn in sorted(list(head_decay))],
-                ),
-                "lr": 20.*self.hparams.lr,
-                "weight_decay": self.hparams.weight_decay,
-            },
-            {
-                "params": filter(
-                    lambda p: p.requires_grad,
-                    [param_dict[pn] for pn in sorted(list(head_no_decay))],
-                ),
-                "lr": 20.*self.hparams.lr,
                 "weight_decay": 0.0,
             },
         ]
 
         optimizer = torch.optim.AdamW(
             optim_groups,
-            # lr=self.hparams.lr,
+            lr=self.hparams.lr,
             betas=(self.hparams.beta1, self.hparams.beta2),
             eps=1e-6,
         )

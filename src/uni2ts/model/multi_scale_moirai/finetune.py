@@ -72,7 +72,7 @@ from uni2ts.transform import (
 
 from .module import MoiraiModule
 from uni2ts.module.multi_scale.attention import GroupedQueryAttention
-
+from peft import LoraConfig, LoraModel
 
 
 class MoiraiFinetune(L.LightningModule):
@@ -117,6 +117,8 @@ class MoiraiFinetune(L.LightningModule):
         finetune_pattern: str | list[str] = "full",
         num_new_scales: Optional[int] = None,
         ds_factor: int = 2,
+        use_lora: bool = False,
+        lora_kwargs: Optional[dict[str, Any]] = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
@@ -131,22 +133,36 @@ class MoiraiFinetune(L.LightningModule):
 
         self.token_idx_per_scale = self._get_token_idx_per_scale()
 
-    def post_init(self):
+        # Lora config
+        self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
 
-        for layer in self.module.encoder.layers:
-            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-                # Call post_init() method of the GroupedQueryAttention object
-                layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
+    def post_init(self):
+        """
+        Initialize the new params added for Multi Scale.
+        """
+
+        # for layer in self.module.encoder.layers:
+        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+        #         # Call post_init() method of the GroupedQueryAttention object
+        #         layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
 
         # for module in self.module.encoder.modules():
         #     if isinstance(module, MultiScaleRotaryProjection):
         #         module.post_init(self.token_idx_per_scale)
 
-            # ToDo: Call post_init() method to replace BinaryAttentionBias to CrossVariateAttentionBias
-            #   from_pretrained的Pipeline是什么？先init,再load? 然后load不了的参数自动忽略？如果是这样就不用加post_init
-            #   直接再transformer处修改var_attn_bias的类型就行了
-
+        if self.lora_config is not None:
+            self.module = LoraModel(self.module, self.lora_config, "default")
+            # Params not used in Lora are set as requires_grad=False automatically.
+            # Activate some of those params manually. FFN and out_proj are kept as frozen.
+            for pn, p in self.named_parameters():
+                if "param_proj" in pn or "in_proj" in pn:
+                    p.requires_grad = True
+                if "norm" in pn:
+                    p.requires_grad = True
+                if "mask_encoding" in pn or "var_attn_bias" in pn:
+                    p.requires_grad = True
+                # ToDo: Note to include new learnable params introduced in MS
 
     def _get_token_idx_per_scale(self):
         base_token_len = math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
@@ -334,6 +350,9 @@ class MoiraiFinetune(L.LightningModule):
             if "var_attn_bias.emb" in pn:
                 p.requires_grad = True
 
+            if "pe_weights" in pn:  # Learnable RoPE for time id proj
+                p.requires_grad = True
+
         # Unfreeze the corresponding params
         if "param_proj" in self.finetune_pattern:
             for pn, p in self.named_parameters():
@@ -426,6 +445,10 @@ class MoiraiFinetune(L.LightningModule):
                     no_decay.add(fpn)
                 elif "adapt_weight" in pn or "adapt_bias" in pn:
                     decay.add(fpn)
+                elif 'pe_weights' in pn:
+                    decay.add(fpn)
+                # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj
+                #     decay.add(fpn)
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
@@ -439,6 +462,10 @@ class MoiraiFinetune(L.LightningModule):
         assert (
             len(param_dict.keys() - union_params) == 0
         ), f"parameters {str(param_dict.keys() - union_params)} were not separated into either decay/no_decay set!"
+        assert (
+            len(union_params - param_dict.keys()) == 0
+        ), f"parameters {str(union_params - param_dict.keys())} were not included in param_dict!"
+
 
         optim_groups = [
             {

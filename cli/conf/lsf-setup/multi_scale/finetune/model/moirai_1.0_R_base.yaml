@@ -41,3 +41,11 @@ prediction_length: null
 finetune_pattern: full
 num_new_scales: 3
 ds_factor: 2
+
+use_lora: True
+lora_kwargs:
+  _target_: builtins.dict
+  r: 16
+  target_modules: ["q_proj", "k_proj", "v_proj"]
+  lora_alpha: 32
+  lora_dropout: 0.05
