@@ -9,18 +9,21 @@ exp_name=lsf
 cl=2000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_rope_1.0/full/weather/S/cl2000_pl96/checkpoints/epoch_9-step_14280.ckpt'
-cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_rope_1.0/full/weather/S/cl2000_pl192/checkpoints/epoch_6-step_9968.ckpt'
-cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_rope_1.0/full/weather/S/cl2000_pl336/checkpoints/epoch_4-step_7090.ckpt'
-cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/ms_qkv_rope_1.0/full/weather/S/cl2000_pl720/checkpoints/epoch_2-step_4206.ckpt'
+#cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/learned_time_id/full/weather/S/cl2000_pl96/checkpoints/epoch_8-step_12852.ckpt'
+#cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/learned_time_id/full/weather/S/cl2000_pl192/checkpoints/epoch_6-step_9968.ckpt'
+cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/learned_time_id/full/weather/S/cl2000_pl336/checkpoints/epoch_5-step_8508.ckpt'
+cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/learned_time_id/full/weather/S/cl2000_pl720/checkpoints/epoch_3-step_5608.ckpt'
 
 index=1
-for pl in 96 192 336 720; do
+for pl in 336 720; do  # 96 192
   case $index in
-    1) cpp=$cpp1 ;;
-    2) cpp=$cpp2 ;;
-    3) cpp=$cpp3 ;;
-    4) cpp=$cpp4 ;;
+    1) cpp=$cpp3 ;;
+    2) cpp=$cpp4 ;;
+
+#    1) cpp=$cpp1 ;;
+#    2) cpp=$cpp2 ;;
+#    3) cpp=$cpp3 ;;
+#    4) cpp=$cpp4 ;;
   esac
 
   pretrained_model=$(echo $cpp | cut -d'/' -f6)

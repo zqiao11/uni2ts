@@ -22,7 +22,7 @@ import torch
 from einops import einsum, rearrange, repeat
 from jaxtyping import Float, Int
 from torch import nn
-
+import torch.nn.functional as F
 
 class Projection(nn.Module, abc.ABC):
     def __init__(self, proj_width: int, num_heads: int, num_groups: int, **kwargs: Any):
@@ -98,7 +98,7 @@ class RotaryProjection(Projection):
     def forward(
         self,
         x: Float[torch.Tensor, "*batch group hpg seq dim"],  # (32, 6, 1, 46, 32)
-        seq_id: Optional[Int[torch.Tensor, "*batch #group #hpg seq"]],
+        seq_id: Optional[Int[torch.Tensor, "*batch #group #hpg seq"]],  # (32, 1, 1, 46)
     ) -> Float[torch.Tensor, "*batch group hpg seq dim"]:
         self._init_freq(max_len=seq_id.max() + 1)
         rot_cos = self.cos[seq_id]  # (32, 1, 1, 46, 32)
@@ -115,11 +115,13 @@ class MultiScaleRotaryProjection(Projection):
         num_groups: int,
         max_len: int = 512,
         base: int = 10000,
-        token_idx_per_scale: Optional[list] = None  # ToDo: list of time index of each scale [[], [], []]
+        token_idx_per_scale: Optional[list] = None,  # ToDo: list of time index of each scale [[], [], []]
+        base_ctx_token_idx: Optional[list] = None
     ):
         super().__init__(proj_width, num_heads, num_groups)
 
         self.token_idx_per_scale = token_idx_per_scale
+        self.base_ctx_token_idx = base_ctx_token_idx
 
         assert (
             self.proj_width % 2 == 0
@@ -140,20 +142,24 @@ class MultiScaleRotaryProjection(Projection):
 
         self.max_len = max_len
 
-        self.pe_weights = nn.ParameterList([])
+        self.seq_id_q_proj = nn.ParameterList()
+        self.seq_id_k_proj = nn.ParameterList()
 
-
-    def post_init(self, token_idx_per_scale):
+    def post_init(self, token_idx_per_scale, base_ctx_token_idx):
         self.token_idx_per_scale = token_idx_per_scale
+        self.base_ctx_token_idx = base_ctx_token_idx
+
         self.num_scales = len(token_idx_per_scale)
 
-        for i in range(1, self.num_scales):
-            weight = nn.Parameter(
-                torch.empty((self.max_len, self.proj_width, self.proj_width)), requires_grad=True
-            )
-            for idx in range(self.max_len):
-                nn.init.kaiming_uniform_(weight, a=math.sqrt(5))
-            self.pe_weights.append(weight)
+        dim = self.proj_width * self.num_heads  #  ToDo: dim是partial ratio后展开的dim
+
+        # Assign Q and K for each new scale
+        for scale in range(1, self.num_scales):
+            self.seq_id_q_proj.append(nn.Linear(dim, dim))
+            self.seq_id_k_proj.append(nn.Linear(dim, dim))
+
+            # # Todo: norm
+            # q_norm = nn.LayerNorm(dim)
 
     def _init_freq(self, max_len: int):
         if self.cos is None or self.cos.size(-2) < max_len:
@@ -172,28 +178,82 @@ class MultiScaleRotaryProjection(Projection):
 
     def forward(
         self,
-        x: Float[torch.Tensor, "*batch group hpg seq dim"],
+        x: Float[torch.Tensor, "*batch group hpg seq dim"],  # (32, 6, 1, 46, 32)
         seq_id: Optional[Int[torch.Tensor, "*batch #group #hpg seq"]],
     ) -> Float[torch.Tensor, "*batch group hpg seq dim"]:
 
-        out = torch.empty_like(x, device=x.device, dtype=x.dtype)
-        
+        # Create tensors to store multi-scale rot_cos/sin
+        rot_shape = (*seq_id.shape, self.cos.shape[-1])
+        rot_cos = torch.empty(rot_shape, device=seq_id.device, dtype=torch.float)
+        rot_sin = torch.empty(rot_shape, device=seq_id.device, dtype=torch.float)
+
+        # Key: base scale context tokens; Value: base scale time id
+        idx_kv = self.base_ctx_token_idx
+        x_flat = rearrange(x, "... group hpg q_len dim -> ... q_len (group hpg dim)")  # flat multi-head
+        seq_id_flat = rearrange(seq_id, "... group hpg q_len -> ... q_len (group hpg) ")
+        key = x_flat[..., idx_kv, :]   # (bs, len0, dim)
+        value = seq_id_flat[..., idx_kv, :].to(dtype=torch.float)  # (bs, len0, 1)
+
         for i in range(self.num_scales):
             idx_scale_i = self.token_idx_per_scale[i]
 
+            # Directly use original time_id to obtain sin/cos for base scale
             if i == 0:
-                rot_cos = self.cos[seq_id[..., :, :, idx_scale_i]]  # (32, 1, 1, 46, 32)
-                rot_sin = self.sin[seq_id[..., :, :, idx_scale_i]]
-                out[..., :, :, idx_scale_i, :] = rot_cos * x[..., :, :, idx_scale_i, :] + rot_sin * self._rotate(
-                    x[..., :, :, idx_scale_i, :])
+                mapped_seq_id = seq_id[..., :, :, idx_scale_i]  # (bs, 1, 1, len)
+                rot_cos[..., :, :, idx_scale_i, :] = self.cos[mapped_seq_id]  # (bs, 1, 1, len0, proj_width)
+                rot_sin[..., :, :, idx_scale_i, :] = self.sin[mapped_seq_id]
 
+            # For new scales, need to map their time_id to the original scale before computing sin/cos.
             else:
-                weight = self.pe_weights[i-1][seq_id[..., :, :, idx_scale_i]]
-                out[..., :, :, idx_scale_i, :] = einsum(weight, x[..., :, :, idx_scale_i, :], "... out inp, ... inp -> ... out")
+                query = x_flat[..., idx_scale_i, :]   # (bs, leni, dim)
+                query = self.seq_id_q_proj[i - 1](query)
+                key = self.seq_id_k_proj[i - 1](key)  # (bs, len0, dim)
 
-            
-        return out  # QZ: Eq 34 in the paper
+                # Generate attn_mask. Make sure each query only attend to the keys in its down-sampling range.
+                attn_mask = self.generate_segmented_attn_mask(query.shape[0], query.shape[1], key.shape[1], 2**i).to(x.device)
 
+                # mapped_seq_id is float time id on the original scale. (bs, len_i, 1)
+                mapped_seq_id = F.scaled_dot_product_attention(
+                    query,
+                    key,
+                    value,
+                    attn_mask=attn_mask,
+                )
+
+                # Compute the theta for these float id. And their cos/sin.
+                m_theta = einsum(mapped_seq_id.squeeze(), self.theta, "bs length, width -> bs length width")
+                m_theta = repeat(m_theta, "bs length width -> bs length (width 2)")
+                rot_cos[..., :, :, idx_scale_i, :] = torch.cos(m_theta).unsqueeze(1).unsqueeze(2)
+                rot_sin[..., :, :, idx_scale_i, :] = torch.sin(m_theta).unsqueeze(1).unsqueeze(2)
+
+        return rot_cos * x + rot_sin * self._rotate(x)  # QZ: Eq 34 in the paper
+
+    def generate_segmented_attn_mask(self, bs, len_q, len_k, k):
+        """
+        生成一个 attention mask，使得 query 的位置 i 只能注意到 key 的范围 [k*i, k*(i+1)-1]。
+
+        参数：
+        bs: batch size
+        len_q: query 的序列长度
+        len_k: key 的序列长度
+        k: 每个 query 索引范围内 key 的跨度
+
+        返回：
+        attn_mask: BoolTensor，shape = (bs, len_q, len_k)
+        """
+        # 创建基础的 mask
+        attn_mask = torch.zeros(len_q, len_k, dtype=torch.bool)
+
+        for i in range(len_q):
+            # 定义 query 的位置 i 对应的 key 范围
+            start = i * k
+            end = min((i + 1) * k, len_k)  # 防止超出 len_k
+            attn_mask[i, start:end] = True  # 允许注意的范围
+
+        # 扩展到 batch 维度
+        attn_mask = attn_mask.unsqueeze(0).expand(bs, -1, -1)
+
+        return attn_mask
 
 # class MultiScaleRotaryProjection(Projection):
 #     def __init__(

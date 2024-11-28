@@ -131,7 +131,7 @@ class MoiraiFinetune(L.LightningModule):
         self.num_new_scales = num_new_scales
         self.ds_factor = ds_factor
 
-        self.token_idx_per_scale = self._get_token_idx_per_scale()
+        self.token_idx_per_scale, self.base_ctx_token_idx = self._get_token_idx_per_scale()
 
         # Lora config
         self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
@@ -147,9 +147,9 @@ class MoiraiFinetune(L.LightningModule):
         #         # Call post_init() method of the GroupedQueryAttention object
         #         layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
 
-        # for module in self.module.encoder.modules():
-        #     if isinstance(module, MultiScaleRotaryProjection):
-        #         module.post_init(self.token_idx_per_scale)
+        for module in self.module.encoder.modules():
+            if isinstance(module, MultiScaleRotaryProjection):
+                module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
 
         if self.lora_config is not None:
             self.module = LoraModel(self.module, self.lora_config, "default")
@@ -185,7 +185,10 @@ class MoiraiFinetune(L.LightningModule):
             index = list(range(start, end))
             token_idx_per_scale.append(index)
 
-        return token_idx_per_scale
+        base_ctx_token_len = math.ceil(self.context_length / self.patch_size)
+        base_ctx_token_idx = list(range(base_ctx_token_len))
+
+        return token_idx_per_scale, base_ctx_token_idx
 
 
 
@@ -353,6 +356,9 @@ class MoiraiFinetune(L.LightningModule):
             if "pe_weights" in pn:  # Learnable RoPE for time id proj
                 p.requires_grad = True
 
+            if "seq_id_q_proj" in pn or "seq_id_k_proj" in pn:
+                p.requires_grad = True
+
         # Unfreeze the corresponding params
         if "param_proj" in self.finetune_pattern:
             for pn, p in self.named_parameters():
@@ -437,9 +443,9 @@ class MoiraiFinetune(L.LightningModule):
                     continue
 
                 fpn = f"{mn}.{pn}" if mn else pn
-                if pn.endswith("bias"):
+                if pn.endswith("bias") and 'time_qk_proj' not in pn:
                     no_decay.add(fpn)
-                elif pn.endswith("weight") and isinstance(m, whitelist_params):
+                elif pn.endswith("weight") and isinstance(m, whitelist_params) and 'time_qk_proj' not in pn:
                     decay.add(fpn)
                 elif pn.endswith("weight") and isinstance(m, blacklist_params):
                     no_decay.add(fpn)
@@ -447,6 +453,17 @@ class MoiraiFinetune(L.LightningModule):
                     decay.add(fpn)
                 elif 'pe_weights' in pn:
                     decay.add(fpn)
+
+                elif 'layers.0.self_attn.time_qk_proj.seq_id_q_proj' in pn and isinstance(m, whitelist_params):
+                    decay.add(fpn)
+                elif 'layers.0.self_attn.time_qk_proj.seq_id_k_proj' in pn and isinstance(m, whitelist_params):
+                    decay.add(fpn)
+
+                elif 'layers.0.self_attn.time_qk_proj.seq_id_q_proj' in pn and pn.endswith("bias"):
+                    no_decay.add(fpn)
+                elif 'layers.0.self_attn.time_qk_proj.seq_id_k_proj' in pn and pn.endswith("bias"):
+                    no_decay.add(fpn)
+
                 # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj
                 #     decay.add(fpn)
 

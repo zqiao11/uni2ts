@@ -434,7 +434,7 @@ class GroupedQueryAttention(nn.Module):
         )
 
         # Add attn_bias
-        attn_mask = self._update_attn_mask(
+        attn_mask = self._update_attn_mask(     # (bs, 6, 1, len, len)
             attn_mask,
             query,
             key,

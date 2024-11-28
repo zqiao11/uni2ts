@@ -32,5 +32,6 @@ for pl in 96 192 336 720; do
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
+  train_dataloader.batch_size=256 \
   model.lr=5e-6
 done

@@ -117,14 +117,14 @@ class MoiraiForecast(L.LightningModule):
         ), "if module is not provided, module_kwargs is required"
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
-        self.module = MoiraiModule(**module_kwargs) if module is None else module
+        self.module = MoiraiModule(**module_kwargs) if module is None else module  # module is None. Initialized by module_kwargs
         self.per_sample_loss_func = SampleNLLLoss()
         self.num_new_scales = num_new_scales
 
         self.ds_factor = ds_factor
         self.strict_loading = False
 
-        self.token_idx_per_scale = self._get_token_idx_per_scale()
+        self.token_idx_per_scale, self.base_ctx_token_idx = self._get_token_idx_per_scale()
 
         # Set Lora for Moirai
         if use_lora:
@@ -147,9 +147,9 @@ class MoiraiForecast(L.LightningModule):
         #         # Call post_init() method of the GroupedQueryAttention object
         #         layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
 
-        # for module in self.module.encoder.modules():
-        #     if isinstance(module, MultiScaleRotaryProjection):
-        #         module.post_init(self.token_idx_per_scale)
+        for module in self.module.encoder.modules():
+            if isinstance(module, MultiScaleRotaryProjection):
+                module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
 
         pass
 
@@ -175,7 +175,10 @@ class MoiraiForecast(L.LightningModule):
             index = list(range(start, end))
             token_idx_per_scale.append(index)
 
-        return token_idx_per_scale
+        base_ctx_token_len = math.ceil(self.hparams.context_length / self.hparams.patch_size)
+        base_ctx_token_idx = list(range(base_ctx_token_len))
+
+        return token_idx_per_scale, base_ctx_token_idx
 
 
     @contextmanager

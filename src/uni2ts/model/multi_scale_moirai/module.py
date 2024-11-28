@@ -123,15 +123,15 @@ class MoiraiModule(
                 # num_vars=4   # ToDo: 这个num_vars得提供外部接口
             ),
             time_qk_proj_layer=partial(
-                # QueryKeyProjection,
-                # proj_layer=MultiScaleRotaryProjection,
-                # kwargs=dict(max_len=max_seq_len),
-                # partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
-
                 QueryKeyProjection,
-                proj_layer=RotaryProjection,  # ToDo: 可以改
+                proj_layer=MultiScaleRotaryProjection,
                 kwargs=dict(max_len=max_seq_len),
                 partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
+
+                # QueryKeyProjection,
+                # proj_layer=RotaryProjection,  # ToDo: 可以改
+                # kwargs=dict(max_len=max_seq_len),
+                # partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
             ),
             shared_var_attn_bias=False,
             shared_time_qk_proj=True,   # True by default

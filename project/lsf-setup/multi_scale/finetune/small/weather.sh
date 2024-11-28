@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune
-exp_name=ms_qkv_rope_1.0
+exp_name=learned_time_id
 data=weather
 cl=2000
 ps=128
