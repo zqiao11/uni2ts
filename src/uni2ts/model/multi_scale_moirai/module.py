@@ -140,7 +140,8 @@ class MoiraiModule(
         self.distr_output = distr_output
         self.param_proj = self.distr_output.get_param_proj(d_model, patch_sizes)
 
-        # self.num_new_scales = num_new_scales
+        self.time_id_q_proj = nn.ParameterList()
+        self.time_id_k_proj = nn.ParameterList()
 
     def forward(
         self,
@@ -172,13 +173,42 @@ class MoiraiModule(
         :param patch_size: patch size for each token
         :return: predictive distribution
         """
+
+        # Map time id for new scales.
+        # Key: base scale context tokens; Value: base scale time id
+        time_id = time_id.to(torch.float)
+        idx_kv = self.base_ctx_token_idx
+        key = target[..., idx_kv, :self.ps].clone()  # (bs, len0, dim)
+        value = time_id[..., idx_kv].clone().unsqueeze(-1).to(dtype=torch.float)  # (bs, len0, 1)
+
+        for i in range(1, self.num_scales):
+            idx_scale_i = self.token_idx_per_scale[i]
+
+            query = target[..., idx_scale_i, :self.ps].clone()   # (bs, leni, dim)
+            query = self.time_id_q_proj[i - 1](query)
+            key = self.time_id_k_proj[i - 1](key)  # (bs, len0, dim)
+
+            # Generate attn_mask. Make sure each query only attend to the keys in its down-sampling range.
+            attn_mask = self.generate_segmented_attn_mask(query, key, 2**i)
+
+            # mapped_time_id is float time id on the original scale. (bs, len_i, 1)
+            mapped_time_id = F.scaled_dot_product_attention(
+                query,
+                key,
+                value,
+                attn_mask=attn_mask,
+            )
+
+            time_id[..., idx_scale_i] = mapped_time_id.squeeze()
+
         loc, scale = self.scaler(
             target,
             observed_mask * ~prediction_mask.unsqueeze(-1),
             sample_id,
             variate_id,
         )
-        scaled_target = (target - loc) / scale
+        scaled_target = (target - loc) / scale    # ToDo: If use conv for DS, consider to modify here?
+
         reprs = self.in_proj(scaled_target, patch_size)
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
 
@@ -191,3 +221,44 @@ class MoiraiModule(
         distr_param = self.param_proj(reprs, patch_size)
         distr = self.distr_output.distribution(distr_param, loc=loc, scale=scale)
         return distr
+
+    def post_init(self, token_idx_per_scale, base_ctx_token_idx, patch_size):
+        self.token_idx_per_scale = token_idx_per_scale
+        self.base_ctx_token_idx = base_ctx_token_idx
+
+        self.num_scales = len(token_idx_per_scale)
+
+        self.ps = patch_size
+
+        # Assign Q and K for each new scale
+        for scale in range(1, self.num_scales):
+            self.time_id_q_proj.append(nn.Linear(self.ps, self.ps))
+            self.time_id_k_proj.append(nn.Linear(self.ps, self.ps))
+
+    def generate_segmented_attn_mask(self, query, key, k):
+        """
+        生成一个 attention mask，使得 query 的位置 i 只能注意到 key 的范围 [k*i, k*(i+1)-1]。
+
+        参数：
+        bs: batch size
+        len_q: query 的序列长度
+        len_k: key 的序列长度
+        k: 每个 query 索引范围内 key 的跨度
+
+        返回：
+        attn_mask: BoolTensor，shape = (bs, len_q, len_k)
+        """
+        bs, len_q, len_k = query.shape[0], query.shape[1], key.shape[1]
+        # 创建基础的 mask
+        attn_mask = torch.zeros(len_q, len_k, dtype=torch.bool)
+
+        for i in range(len_q):
+            # 定义 query 的位置 i 对应的 key 范围
+            start = i * k
+            end = min((i + 1) * k, len_k)  # 防止超出 len_k
+            attn_mask[i, start:end] = True  # 允许注意的范围
+
+        # 扩展到 batch 维度
+        attn_mask = attn_mask.unsqueeze(0).expand(bs, -1, -1)
+
+        return attn_mask.to(query.device)

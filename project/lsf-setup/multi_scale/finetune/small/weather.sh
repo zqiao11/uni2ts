@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune
-exp_name=learned_time_id
+exp_name=learned_time_id_valMSE
 data=weather
 cl=2000
 ps=128
@@ -31,5 +31,7 @@ for pl in 96 192 336 720; do
   val_data.patch_size=${ps} \
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
-  val_data.mode=${mode}
+  val_data.mode=${mode} \
+  trainer.callbacks."1".monitor=val/PackedMSELoss \
+  trainer.callbacks."3".monitor=val/PackedMSELoss
 done

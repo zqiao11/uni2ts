@@ -32,5 +32,7 @@ for pl in 96 192 336 720; do
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   train_dataloader.batch_size=256 \
-  val_data.mode=${mode}
+  val_data.mode=${mode} \
+  trainer.callbacks."1".monitor=val/PackedMSELoss \
+  trainer.callbacks."3".monitor=val/PackedMSELoss
 done

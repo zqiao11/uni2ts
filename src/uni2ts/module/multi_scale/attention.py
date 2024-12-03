@@ -345,6 +345,7 @@ class GroupedQueryAttention(nn.Module):
         # value = init_value.clone()
         #
         # # ToDo: Plan B: Directly apply different Film on query / key to different scales. W.o revising RoPE
+        #        Clone inplace切片
         # if self.num_new_scales is not None:
         #     index_by_variate = self.get_token_index_by_variate(query_var_id)
         #

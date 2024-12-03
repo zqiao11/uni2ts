@@ -16,9 +16,11 @@
 from .finetune import MoiraiFinetune
 from .forecast import MoiraiForecast
 from .module import MoiraiModule
+from .finetune_two_stage import TwoStageMoiraiFinetune
 
 __all__ = [
     "MoiraiFinetune",
     "MoiraiForecast",
     "MoiraiModule",
+    "TwoStageMoiraiFinetune"
 ]

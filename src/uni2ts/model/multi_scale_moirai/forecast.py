@@ -141,6 +141,8 @@ class MoiraiForecast(L.LightningModule):
         Initialize the new params added for Multi Scale.
         """
 
+        self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.hparams.patch_size)
+
         # for layer in self.module.encoder.layers:
         #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
         #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):

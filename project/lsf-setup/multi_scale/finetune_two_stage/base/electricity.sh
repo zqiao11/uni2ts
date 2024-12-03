@@ -1,19 +1,19 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_small
-cp=conf/lsf-setup/lsf/finetune
+cp=conf/lsf-setup/multi_scale/finetune_two_stage
 exp_name=lsf
-data=weather
-cl=2000
-ps=128
-mode=S  # M
+data=electricity
+cl=5000
+ps=32
+mode=S
 ft_pattern=full
 
 
-for pl in 720; do  # 96 192 336
-  python -m cli.train \
+for pl in 96 192 336 720; do
+  python -m cli.train_two_stage \
   -cp $cp \
   exp_name=$exp_name \
   run_name=cl${cl}_pl${pl} \
@@ -32,6 +32,5 @@ for pl in 720; do  # 96 192 336
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
-  trainer.callbacks."1".monitor=val/PackedMSELoss \
-  trainer.callbacks."3".monitor=val/PackedMSELoss
+  model.lr=5e-6
 done

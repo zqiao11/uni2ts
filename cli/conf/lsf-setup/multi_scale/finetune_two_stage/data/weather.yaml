@@ -1,0 +1,7 @@
+_target_: uni2ts.data.builder.simple.generate_finetune_builder
+dataset: weather
+train_length: 36887
+prediction_length: ???
+context_length: ???
+patch_size: ???
+mode: ???
