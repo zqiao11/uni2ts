@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune_two_stage
-exp_name=learned_time_id_2stage
+exp_name=1tid_2inproj_all_scale_lora_freezeqkv
 data=ettm2
 cl=3000
 ps=64

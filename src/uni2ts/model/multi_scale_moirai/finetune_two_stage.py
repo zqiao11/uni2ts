@@ -145,11 +145,11 @@ class TwoStageMoiraiFinetune(L.LightningModule):
 
         self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.patch_size)
 
-        # for layer in self.module.encoder.layers:
-        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-        #         # Call post_init() method of the GroupedQueryAttention object
-        #         layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
+        for layer in self.module.encoder.layers:
+            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+                # Call post_init() method of the GroupedQueryAttention object
+                layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
 
         for module in self.module.encoder.modules():
             if isinstance(module, MultiScaleRotaryProjection):
@@ -331,6 +331,48 @@ class TwoStageMoiraiFinetune(L.LightningModule):
 
     def configure_optimizers(self) -> dict:
 
+        # if self.current_stage == 1:
+        #     warmup_pn_group1 = ['param_proj', 'time_id_q_proj', 'time_id_k_proj']
+        #     warmup_pn_group2 = ['in_proj_new_scales']
+        #
+        #     optim_groups = [
+        #         {
+        #             "params": [
+        #                 p for pn, p in self.named_parameters()
+        #                 if any(keyword in pn for keyword in warmup_pn_group1)
+        #             ],
+        #             "lr": 5e-4,
+        #             "weight_decay": self.hparams.weight_decay,
+        #         },
+        #         {
+        #             "params": [
+        #                 p for pn, p in self.named_parameters()
+        #                 if any(keyword in pn for keyword in warmup_pn_group2)
+        #             ],
+        #             "lr": 5e-6,
+        #             "weight_decay": self.hparams.weight_decay,
+        #         },
+        #     ]
+        #
+        #     optimizer = torch.optim.AdamW(
+        #         optim_groups,
+        #         betas=(self.hparams.beta1, self.hparams.beta2),
+        #         eps=1e-6,
+        #     )
+        #
+        #     warmup_params_all = {
+        #         pn: p for pn, p in self.named_parameters()
+        #         if any(keyword in pn for keyword in warmup_pn_group1 + warmup_pn_group2)
+        #     }
+        #     self.trainable_params = warmup_params_all
+        #
+        #     scheduler = get_scheduler(
+        #         SchedulerType.CONSTANT,  # Use constant lr scheduler
+        #         optimizer,
+        #         num_warmup_steps=self.hparams.num_warmup_steps,
+        #         num_training_steps=self.hparams.num_training_steps,
+        #     )
+
         if self.current_stage == 1:
             warmup_pn = ['param_proj', 'time_id_q_proj', 'time_id_k_proj']
             warmup_params = {
@@ -473,6 +515,12 @@ class TwoStageMoiraiFinetune(L.LightningModule):
                     elif "adapt_weight" in pn or "adapt_bias" in pn:
                         decay.add(fpn)
                     elif 'pe_weights' in pn:
+                        decay.add(fpn)
+                    elif 'q_A' in pn or 'q_B' in pn:
+                        decay.add(fpn)
+                    elif 'k_A' in pn or 'k_B' in pn:
+                        decay.add(fpn)
+                    elif 'v_A' in pn or 'v_B' in pn:
                         decay.add(fpn)
 
                     # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj

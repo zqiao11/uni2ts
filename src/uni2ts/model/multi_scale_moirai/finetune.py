@@ -143,11 +143,11 @@ class MoiraiFinetune(L.LightningModule):
 
         self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.patch_size)
 
-        # for layer in self.module.encoder.layers:
-        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-        #         # Call post_init() method of the GroupedQueryAttention object
-        #         layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
+        for layer in self.module.encoder.layers:
+            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+                # Call post_init() method of the GroupedQueryAttention object
+                layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
 
         for module in self.module.encoder.modules():
             if isinstance(module, MultiScaleRotaryProjection):
@@ -454,6 +454,12 @@ class MoiraiFinetune(L.LightningModule):
                 elif "adapt_weight" in pn or "adapt_bias" in pn:
                     decay.add(fpn)
                 elif 'pe_weights' in pn:
+                    decay.add(fpn)
+                elif 'q_A' in pn or 'q_B' in pn or 'q_bias' in pn:
+                    decay.add(fpn)
+                elif 'k_A' in pn or 'k_B' in pn or 'k_bias' in pn:
+                    decay.add(fpn)
+                elif 'v_A' in pn or 'v_B' in pn or 'v_bias' in pn:
                     decay.add(fpn)
 
                 # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj

@@ -23,7 +23,7 @@ trainer_warmup:
   logger:
       _target_: lightning.pytorch.loggers.TensorBoardLogger
       save_dir: ${hydra:runtime.output_dir}
-      name: logs
+      name: logs_warmup
   callbacks:
     - _target_: lightning.pytorch.callbacks.LearningRateMonitor
       logging_interval: epoch
