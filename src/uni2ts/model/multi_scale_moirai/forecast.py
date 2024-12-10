@@ -109,6 +109,8 @@ class MoiraiForecast(L.LightningModule):
         pretrained_checkpoint_path: str = None,
         num_new_scales: int = 1,
         ds_factor: int = 2,
+        r: int = 16,
+        alpha: int = 16,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
     ):
@@ -122,6 +124,9 @@ class MoiraiForecast(L.LightningModule):
         self.num_new_scales = num_new_scales
 
         self.ds_factor = ds_factor
+        self.r = r
+        self.alpha = alpha
+
         self.strict_loading = False
 
         self.token_idx_per_scale, self.base_ctx_token_idx = self._get_token_idx_per_scale()
@@ -132,7 +137,7 @@ class MoiraiForecast(L.LightningModule):
             self.module = LoraModel(self.module, self.lora_config, "default")
 
 
-        self.post_init()   # ToDO: Make it optional.
+        self.post_init()
 
 
 
@@ -140,18 +145,19 @@ class MoiraiForecast(L.LightningModule):
         """
         Initialize the new params added for Multi Scale.
         """
-
-        self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.hparams.patch_size)
+        # ToDo: for time id & in_proj
+        # self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.hparams.patch_size)
 
         for layer in self.module.encoder.layers:
             # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
             if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
                 # Call post_init() method of the GroupedQueryAttention object
-                layer.self_attn.init_multi_scale_modules(self.hparams.context_length, self.hparams.patch_size, self.num_new_scales, self.ds_factor)
+                layer.self_attn.init_multi_scale_modules(self.num_new_scales, self.r, self.alpha)
 
-        for module in self.module.encoder.modules():
-            if isinstance(module, MultiScaleRotaryProjection):
-                module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
+        # ToDo: for time id
+        # for module in self.module.encoder.modules():
+        #     if isinstance(module, MultiScaleRotaryProjection):
+        #         module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
 
         pass
 

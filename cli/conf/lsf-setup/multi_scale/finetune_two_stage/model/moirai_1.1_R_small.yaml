@@ -41,6 +41,8 @@ prediction_length: null
 finetune_pattern: full
 num_new_scales: 3
 ds_factor: 2
+r: 16
+alpha: 16
 
 use_lora: False
 lora_kwargs:

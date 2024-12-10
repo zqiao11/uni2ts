@@ -117,6 +117,8 @@ class MoiraiFinetune(L.LightningModule):
         finetune_pattern: str | list[str] = "full",
         num_new_scales: Optional[int] = None,
         ds_factor: int = 2,
+        r: int = 16,
+        alpha: int = 16,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
     ):
@@ -130,6 +132,8 @@ class MoiraiFinetune(L.LightningModule):
         self.finetune_pattern = finetune_pattern
         self.num_new_scales = num_new_scales
         self.ds_factor = ds_factor
+        self.r = r
+        self.alpha = alpha
 
         self.token_idx_per_scale, self.base_ctx_token_idx = self._get_token_idx_per_scale()
 
@@ -140,18 +144,19 @@ class MoiraiFinetune(L.LightningModule):
         """
         Initialize the new params added for Multi Scale.
         """
-
-        self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.patch_size)
+        # ToDo: for time id & in_proj
+        # self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.patch_size)
 
         for layer in self.module.encoder.layers:
             # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
             if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
                 # Call post_init() method of the GroupedQueryAttention object
-                layer.self_attn.init_multi_scale_modules(self.context_length, self.patch_size, self.num_new_scales, self.ds_factor)
+                layer.self_attn.init_multi_scale_modules(self.num_new_scales, self.r, self.alpha)
 
-        for module in self.module.encoder.modules():
-            if isinstance(module, MultiScaleRotaryProjection):
-                module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
+        # ToDo: for time id
+        # for module in self.module.encoder.modules():
+        #     if isinstance(module, MultiScaleRotaryProjection):
+        #         module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
 
         if self.lora_config is not None:
             self.module = LoraModel(self.module, self.lora_config, "default")
@@ -191,8 +196,6 @@ class MoiraiFinetune(L.LightningModule):
         base_ctx_token_idx = list(range(base_ctx_token_len))
 
         return token_idx_per_scale, base_ctx_token_idx
-
-
 
     def forward(
         self,
@@ -337,25 +340,8 @@ class MoiraiFinetune(L.LightningModule):
             for param in self.parameters():
                 param.requires_grad = False
 
-        # # Always learn the scale embedding
-        # for pn, p in self.named_parameters():
-        #     if "new_scale_encoding" in pn:
-        #         p.requires_grad = True
-
         for pn, p in self.named_parameters():
-            if "film" in pn:
-                p.requires_grad = True
-
-            if "adapt_weight" in pn:
-                p.requires_grad = True
-
-            if "adapt_bias" in pn:
-                p.requires_grad = True
-
             if "var_attn_bias.emb" in pn:
-                p.requires_grad = True
-
-            if "pe_weights" in pn:  # Learnable RoPE for time id proj
                 p.requires_grad = True
 
             if "time_id_q_proj" in pn or "time_id_k_proj" in pn:
@@ -372,7 +358,7 @@ class MoiraiFinetune(L.LightningModule):
                 if "in_proj" in pn:
                     p.requires_grad = True
 
-        if "norm" in self.finetune_pattern:  #
+        if "rms_norm" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "norm1" in pn or "norm2" in pn:
                     p.requires_grad = True
@@ -417,14 +403,6 @@ class MoiraiFinetune(L.LightningModule):
                 if "out_proj" in pn:
                     p.requires_grad = True
 
-        if "studentT" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if (
-                    "param_proj.proj.components.0" in pn
-                    or "param_proj.proj.weights_logits" in pn
-                ):
-                    p.requires_grad = True
-
         whitelist_params = (
             LearnedProjection,
             MultiInSizeLinear,
@@ -451,15 +429,11 @@ class MoiraiFinetune(L.LightningModule):
                     decay.add(fpn)
                 elif pn.endswith("weight") and isinstance(m, blacklist_params):
                     no_decay.add(fpn)
-                elif "adapt_weight" in pn or "adapt_bias" in pn:
+                elif 'q_A' in pn or 'q_B' in pn:
                     decay.add(fpn)
-                elif 'pe_weights' in pn:
+                elif 'k_A' in pn or 'k_B' in pn:
                     decay.add(fpn)
-                elif 'q_A' in pn or 'q_B' in pn or 'q_bias' in pn:
-                    decay.add(fpn)
-                elif 'k_A' in pn or 'k_B' in pn or 'k_bias' in pn:
-                    decay.add(fpn)
-                elif 'v_A' in pn or 'v_B' in pn or 'v_bias' in pn:
+                elif 'v_A' in pn or 'v_B' in pn:
                     decay.add(fpn)
 
                 # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj
@@ -467,7 +441,7 @@ class MoiraiFinetune(L.LightningModule):
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
-        self.trainable_params = param_dict
+        self.updated_params = param_dict
 
         inter_params = decay & no_decay
         union_params = decay | no_decay
@@ -792,7 +766,7 @@ class MoiraiFinetune(L.LightningModule):
 
     def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
         """
-        Modify state_dict to only save trainable params.
+        Modify state_dict to only save updated params.
         Note the default state_dict saved by PL converts all params to require_grads=False
         """
         state = super().state_dict(
@@ -801,7 +775,7 @@ class MoiraiFinetune(L.LightningModule):
         filtered_state = {
             name: tensor
             for name, tensor in state.items()
-            if name in self.trainable_params
+            if name in self.updated_params
         }
         return filtered_state
 

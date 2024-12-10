@@ -101,119 +101,36 @@ class GroupedQueryAttention(nn.Module):
         self.num_new_scales = None
 
 
-    def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor, ):
+    def init_multi_scale_modules(self, num_new_scales, r, alpha):
         self.num_new_scales = num_new_scales
 
-        rank = 16
+        self.r = r
+        self.alpha = alpha
+
+        print(" ******** r={}, alpha={} *********".format(r, alpha))
 
         # Initialize parameter lists
         self.q_A = nn.ParameterList()
         self.q_B = nn.ParameterList()
-        self.q_bias = nn.ParameterList()
-
         self.k_A = nn.ParameterList()
         self.k_B = nn.ParameterList()
-        self.k_bias = nn.ParameterList()
-
         self.v_A = nn.ParameterList()
         self.v_B = nn.ParameterList()
-        self.v_bias = nn.ParameterList()
 
-        # 包括origin scale，也用lora；冻结住q k v
+        # freeze q k v
         self.q_proj.requires_grad_(False)
         self.k_proj.requires_grad_(False)
         self.v_proj.requires_grad_(False)
 
         for _ in range(1+num_new_scales):
             # Append the new parameters for the current scale
-            self.q_A.append(nn.Parameter(torch.randn((rank, self.dim), dtype=torch.float) * 0.01))
-            self.k_A.append(nn.Parameter(torch.randn((rank, self.dim), dtype=torch.float) * 0.01))
-            self.v_A.append(nn.Parameter(torch.randn((rank, self.dim), dtype=torch.float) * 0.01))
+            self.q_A.append(nn.Parameter(torch.randn((r, self.dim), dtype=torch.float) * 0.01))
+            self.k_A.append(nn.Parameter(torch.randn((r, self.dim), dtype=torch.float) * 0.01))
+            self.v_A.append(nn.Parameter(torch.randn((r, self.dim), dtype=torch.float) * 0.01))
 
-            self.q_B.append(nn.Parameter(torch.zeros((self.dim, rank), dtype=torch.float)))
-            self.k_B.append(nn.Parameter(torch.zeros((self.dim, rank), dtype=torch.float)))
-            self.v_B.append(nn.Parameter(torch.zeros((self.dim, rank), dtype=torch.float)))
-
-
-        # for _ in range(num_new_scales):
-        #     # Append the new parameters for the current scale
-        #     self.q_A.append(nn.Parameter(torch.randn((rank, self.dim), dtype=torch.float) * 0.01))
-        #     self.k_A.append(nn.Parameter(torch.randn((rank, self.dim), dtype=torch.float) * 0.01))
-        #     self.v_A.append(nn.Parameter(torch.randn((rank, self.dim), dtype=torch.float) * 0.01))
-        #
-        #     self.q_B.append(nn.Parameter(torch.zeros((self.dim, rank), dtype=torch.float)))
-        #     self.k_B.append(nn.Parameter(torch.zeros((self.dim, rank), dtype=torch.float)))
-        #     self.v_B.append(nn.Parameter(torch.zeros((self.dim, rank), dtype=torch.float)))
-
-
-
-
-
-
-        # base_len = math.ceil(context_length / patch_size)  # num context patches in base scale
-        # scale_len = math.ceil(base_len / ds_factor)
-
-        # # Initialize parameter lists
-        # self.query_adapt_weight = nn.ParameterList()
-        # self.key_adapt_weight = nn.ParameterList()
-        # self.value_adapt_weight = nn.ParameterList()
-        # self.query_adapt_bias = nn.ParameterList()
-        # self.key_adapt_bias = nn.ParameterList()
-        # self.value_adapt_bias = nn.ParameterList()
-        #
-        # for _ in range(num_new_scales):
-        #     # Append the new parameters for the current scale
-        #     self.query_adapt_weight.append(
-        #         nn.Parameter(torch.ones((scale_len, self.dim), dtype=torch.float), requires_grad=True))
-        #     self.key_adapt_weight.append(
-        #         nn.Parameter(torch.ones((scale_len, self.dim), dtype=torch.float), requires_grad=True))
-        #     self.value_adapt_weight.append(
-        #         nn.Parameter(torch.ones((scale_len, self.dim), dtype=torch.float), requires_grad=True))
-        #
-        #     self.query_adapt_bias.append(
-        #         nn.Parameter(torch.zeros((scale_len, self.dim), dtype=torch.float), requires_grad=True))
-        #     self.key_adapt_bias.append(
-        #         nn.Parameter(torch.zeros((scale_len, self.dim), dtype=torch.float), requires_grad=True))
-        #     self.value_adapt_bias.append(
-        #         nn.Parameter(torch.zeros((scale_len, self.dim), dtype=torch.float), requires_grad=True))
-        #
-        #     # Update scale length for the next iteration
-        #     scale_len = math.ceil(scale_len / ds_factor)
-
-
-    # def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor):
-    #
-    #     self.num_new_scales = num_new_scales
-    #
-    #     nh = self.dim//4
-    #     self.film_controller = nn.Sequential(nn.Linear(self.dim, nh), nn.SiLU())
-    #
-    #     self.query_film_generator = nn.ModuleList([
-    #         nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
-    #     ])
-    #
-    #     self.key_film_generator = nn.ModuleList([
-    #         nn.Linear(in_features=nh, out_features=self.dim) for _ in range(num_new_scales)
-    #     ])
-
-    # def init_multi_scale_modules(self, context_length, patch_size, num_new_scales, ds_factor):
-    # 
-    #     self.num_new_scales = num_new_scales
-    # 
-    #     base_len = math.ceil(context_length / patch_size)  # num context patches in base scale
-    #     scale_len = math.ceil(base_len / ds_factor)
-    # 
-    #     self.query_film_generator = nn.ModuleList()
-    #     self.key_film_generator = nn.ModuleList()
-    # 
-    #     for _ in range(num_new_scales):
-    #         self.query_film_generator.append(
-    #             nn.Linear(in_features=self.dim, out_features=2 * scale_len)
-    #         )
-    #         self.key_film_generator.append(
-    #             nn.Linear(in_features=self.dim, out_features=2 * scale_len)
-    #         )
-    #         scale_len = math.ceil(scale_len / ds_factor)
+            self.q_B.append(nn.Parameter(torch.zeros((self.dim, r), dtype=torch.float)))
+            self.k_B.append(nn.Parameter(torch.zeros((self.dim, r), dtype=torch.float)))
+            self.v_B.append(nn.Parameter(torch.zeros((self.dim, r), dtype=torch.float)))
 
     def _get_var_id(
         self,
@@ -372,21 +289,13 @@ class GroupedQueryAttention(nn.Module):
                    layer: nn.Linear,
                    A: nn.Parameter,
                    B: nn.Parameter,
-                   alpha: float = 1.0,
                    ):
         """
         在给定的线性层上应用 LoRA。
         """
-        # 获取线性层的权重和偏置
-        W_no_grad = layer.weight.detach()  # 冻结权重
-
-        # LoRA 更新部分
-        lora_update = alpha * (B @ A)  # (in_features, out_features)
-
-        # 合成 LoRA 后的权重
-        W_lora = W_no_grad + lora_update  # 最终的权重 (in_features, out_features)
-
-        # 计算输出
+        W_no_grad = layer.weight.detach()
+        lora_update = (self.alpha / self.r) * (B @ A)  # (in_features, out_features)
+        W_lora = W_no_grad + lora_update  # (in_features, out_features)
         out = torch.matmul(input, W_lora.T)
 
         return out
@@ -407,7 +316,7 @@ class GroupedQueryAttention(nn.Module):
         # key = self.k_proj(key)
         # value = self.v_proj(value)
 
-
+        # ToDO: Apply lora for each scale
         updated_query = query.clone()
         updated_key = key.clone()
         updated_value = value.clone()
@@ -429,38 +338,6 @@ class GroupedQueryAttention(nn.Module):
         query = updated_query
         key = updated_key
         value = updated_value
-
-
-        # # ToDo: 这个可以  v1
-        # updated_query = query.clone()
-        # updated_key = key.clone()
-        # updated_value = value.clone()
-        #
-        # if self.num_new_scales is not None:
-        #     index_by_variate = self.get_token_index_by_variate(query_var_id)
-        #     assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
-        #
-        #     for scale in range(1 + self.num_new_scales):
-        #         index = index_by_variate[scale]
-        #         query_scale = query[..., index, :]
-        #         key_scale = key[..., index, :]
-        #         value_scale = value[..., index, :]
-        #
-        #         if scale == 0:
-        #             updated_query[..., index, :] = self.q_proj(query_scale)
-        #             updated_key[..., index, :] = self.k_proj(key_scale)
-        #             updated_value[..., index, :] = self.v_proj(value_scale)
-        #
-        #         else:
-        #             i = scale-1
-        #             updated_query[..., index, :] = self.apply_lora(query_scale, self.q_proj, self.q_A[i], self.q_B[i])
-        #             updated_key[..., index, :] = self.apply_lora(key_scale, self.k_proj, self.k_A[i], self.k_B[i])
-        #             updated_value[..., index, :] = self.apply_lora(value_scale, self.v_proj, self.v_A[i], self.v_B[i])
-        #
-        # query = updated_query
-        # key = updated_key
-        # value = updated_value
-
 
         query = self.q_norm(
             rearrange(

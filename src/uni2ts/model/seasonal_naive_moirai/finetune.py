@@ -293,7 +293,7 @@ class MoiraiFinetune(L.LightningModule):
                 if "in_proj" in pn:
                     p.requires_grad = True
 
-        if "norm" in self.finetune_pattern:
+        if "rms_norm" in self.finetune_pattern:
             for pn, p in self.named_parameters():
                 if "norm1" in pn or "norm2" in pn:
                     p.requires_grad = True
@@ -375,7 +375,7 @@ class MoiraiFinetune(L.LightningModule):
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
-        self.trainable_params = param_dict
+        self.updated_params = param_dict
 
         inter_params = decay & no_decay
         union_params = decay | no_decay
@@ -720,6 +720,6 @@ class MoiraiFinetune(L.LightningModule):
         filtered_state = {
             name: tensor
             for name, tensor in state.items()
-            if name in self.trainable_params
+            if name in self.updated_params
         }
         return filtered_state

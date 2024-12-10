@@ -9,10 +9,10 @@ exp_name=lsf
 cl=2000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/1tid_2inproj_all_scale_lora_freezeqkv/full/weather/S/cl2000_pl96/checkpoints/epoch_14-step_21420.ckpt'
-cpp2='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/1tid_2inproj_all_scale_lora_freezeqkv/full/weather/S/cl2000_pl192/checkpoints/epoch_9-step_14240.ckpt'
-cpp3='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/1tid_2inproj_all_scale_lora_freezeqkv/full/weather/S/cl2000_pl336/checkpoints/epoch_5-step_8508.ckpt'
-cpp4='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/1tid_2inproj_all_scale_lora_freezeqkv/full/weather/S/cl2000_pl720/checkpoints/epoch_1-step_2804.ckpt'
+cpp1='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/direct_1full_2head/full/weather/S/cl2000_pl96/checkpoints_warmup/epoch_2-step_4284.ckpt'
+cpp2='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/direct_1full_2head/full/weather/S/cl2000_pl192/checkpoints_warmup/epoch_1-step_2848.ckpt'
+cpp3='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/direct_1full_2head/full/weather/S/cl2000_pl336/checkpoints_warmup/epoch_1-step_2836.ckpt'
+cpp4='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/direct_1full_2head/full/weather/S/cl2000_pl720/checkpoints_warmup/epoch_1-step_2804.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

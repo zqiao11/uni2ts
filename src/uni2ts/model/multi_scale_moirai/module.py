@@ -124,15 +124,15 @@ class MoiraiModule(
                 # num_vars=4   # ToDo: 这个num_vars得提供外部接口
             ),
             time_qk_proj_layer=partial(
-                QueryKeyProjection,
-                proj_layer=MultiScaleRotaryProjection,
-                kwargs=dict(max_len=max_seq_len),
-                partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
-
                 # QueryKeyProjection,
-                # proj_layer=RotaryProjection,  # ToDo: 可以改
+                # proj_layer=MultiScaleRotaryProjection,
                 # kwargs=dict(max_len=max_seq_len),
                 # partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
+
+                QueryKeyProjection,
+                proj_layer=RotaryProjection,  # ToDo: 可以改
+                kwargs=dict(max_len=max_seq_len),
+                partial_factor=(0.0, 0.5),  # 之前的partial factor是0-0.5
             ),
             shared_var_attn_bias=False,
             shared_time_qk_proj=True,   # True by default
@@ -177,32 +177,32 @@ class MoiraiModule(
         :return: predictive distribution
         """
 
-        # Map time id for new scales.
-        # Key: base scale context tokens; Value: base scale time id
-        time_id = time_id.to(torch.float)
-        idx_kv = self.base_ctx_token_idx
-        key = target[..., idx_kv, :self.ps].clone()  # (bs, len0, dim)
-        value = time_id[..., idx_kv].clone().unsqueeze(-1).to(dtype=torch.float)  # (bs, len0, 1)
-
-        for i in range(1, self.num_scales):
-            idx_scale_i = self.token_idx_per_scale[i]
-
-            query = target[..., idx_scale_i, :self.ps].clone()   # (bs, leni, dim)
-            query = self.time_id_q_proj[i - 1](query)
-            key = self.time_id_k_proj[i - 1](key)  # (bs, len0, dim)
-
-            # Generate attn_mask. Make sure each query only attend to the keys in its down-sampling range.
-            attn_mask = self.generate_segmented_attn_mask(query, key, 2**i)
-
-            # mapped_time_id is float time id on the original scale. (bs, len_i, 1)
-            mapped_time_id = F.scaled_dot_product_attention(
-                query,
-                key,
-                value,
-                attn_mask=attn_mask,
-            )
-
-            time_id[..., idx_scale_i] = mapped_time_id.squeeze()
+        # ToDo: Map time id for new scales.
+        # # Key: base scale context tokens; Value: base scale time id
+        # time_id = time_id.to(torch.float)
+        # idx_kv = self.base_ctx_token_idx
+        # key = target[..., idx_kv, :self.ps].clone()  # (bs, len0, dim)
+        # value = time_id[..., idx_kv].clone().unsqueeze(-1).to(dtype=torch.float)  # (bs, len0, 1)
+        #
+        # for i in range(1, self.num_scales):
+        #     idx_scale_i = self.token_idx_per_scale[i]
+        #
+        #     query = target[..., idx_scale_i, :self.ps].clone()   # (bs, leni, dim)
+        #     query = self.time_id_q_proj[i - 1](query)
+        #     key = self.time_id_k_proj[i - 1](key)  # (bs, len0, dim)
+        #
+        #     # Generate attn_mask. Make sure each query only attend to the keys in its down-sampling range.
+        #     attn_mask = self.generate_segmented_attn_mask(query, key, 2**i)
+        #
+        #     # mapped_time_id is float time id on the original scale. (bs, len_i, 1)
+        #     mapped_time_id = F.scaled_dot_product_attention(
+        #         query,
+        #         key,
+        #         value,
+        #         attn_mask=attn_mask,
+        #     )
+        #
+        #     time_id[..., idx_scale_i] = mapped_time_id.squeeze()
 
         loc, scale = self.scaler(
             target,
@@ -212,23 +212,22 @@ class MoiraiModule(
         )
         scaled_target = (target - loc) / scale    # ToDo: If use conv for DS, consider to modify here?
 
+        reprs = self.in_proj(scaled_target, patch_size)
 
-
-        # reprs = self.in_proj(scaled_target, patch_size)
-
-        reprs_all_scales = []
-        for i in range(0, self.num_scales):
-            idx_scale_i = self.token_idx_per_scale[i]
-
-            if i == 0:
-                reprs_base = self.in_proj(scaled_target[..., idx_scale_i, :], patch_size[..., idx_scale_i])
-                reprs_all_scales.append(reprs_base)
-
-            else:
-                reprs_new_scale = self.in_proj_new_scales[i - 1](scaled_target[..., idx_scale_i, :], patch_size[..., idx_scale_i])
-                reprs_all_scales.append(reprs_new_scale)
-
-        reprs = torch.cat(reprs_all_scales, dim=-2)
+        # ToDo: Add a specific in_proj for each scale
+        # reprs_all_scales = []
+        # for i in range(0, self.num_scales):
+        #     idx_scale_i = self.token_idx_per_scale[i]
+        #
+        #     if i == 0:
+        #         reprs_base = self.in_proj(scaled_target[..., idx_scale_i, :], patch_size[..., idx_scale_i])
+        #         reprs_all_scales.append(reprs_base)
+        #
+        #     else:
+        #         reprs_new_scale = self.in_proj_new_scales[i - 1](scaled_target[..., idx_scale_i, :], patch_size[..., idx_scale_i])
+        #         reprs_all_scales.append(reprs_new_scale)
+        #
+        # reprs = torch.cat(reprs_all_scales, dim=-2)
 
 
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)

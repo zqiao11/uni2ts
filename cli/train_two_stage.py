@@ -27,6 +27,21 @@ from torch.utils.data import Dataset, DistributedSampler
 from uni2ts.common import hydra_util  # noqa: hydra resolvers
 from uni2ts.data.loader import DataLoader
 
+import os
+import glob
+
+
+def get_best_checkpoint_path(checkpoint_dir: str):
+    # list all .ckpt files
+    ckpt_files = glob.glob(os.path.join(checkpoint_dir, "*.ckpt"))
+
+    if len(ckpt_files) == 1:
+        return ckpt_files[0]  # Return the path of the only .ckpt file
+    elif len(ckpt_files) == 0:
+        raise FileNotFoundError(f"No .ckpt file found in {checkpoint_dir}")
+    else:
+        raise ValueError(f"Multiple .ckpt files found in {checkpoint_dir}. Expected only one.")
+
 
 class DataModule(L.LightningDataModule):
     def __init__(
@@ -139,13 +154,12 @@ def main(cfg: DictConfig):
 
     # ToDo: 写training_warmup的config
     trainer_warmup: L.Trainer = instantiate(cfg.trainer_warmup)
-
+    trainer_warmup.callbacks[-1].CHECKPOINT_EQUALS_CHAR = "_"
 
     trainer: L.Trainer = instantiate(cfg.trainer)
 
     # '=' in ckpt name make it cannot be directly loaded with hydra. Change it to '_'.
     trainer.callbacks[-1].CHECKPOINT_EQUALS_CHAR = "_"
-    trainer.callbacks[-2].CHECKPOINT_EQUALS_CHAR = "_"
 
     train_dataset: Dataset = instantiate(cfg.data).load_dataset(
         model.train_transform_map
@@ -190,7 +204,10 @@ def main(cfg: DictConfig):
         ckpt_path=cfg.ckpt_path,
     )
 
-    print("Finished warmup stage. Now finetuning the whole model...")
+    # Load the saved ckpt of the best model in stage 1
+    print("Finished warmup stage. Now loading the saved model and finetuning the whole model...")
+    checkpoint = torch.load(get_best_checkpoint_path(trainer_warmup.callbacks[-1].dirpath))
+    model.load_state_dict(checkpoint["state_dict"])
     model.current_stage = 2
 
     trainer.fit(
