@@ -1,15 +1,15 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/lsf/finetune
-exp_name=lsf
+exp_name=direct_ft
 data=ettm2
 cl=3000
 ps=64
 mode=S
-ft_pattern=full
+ft_pattern=freeze_ffn
 
 
 for pl in 96 192 336 720; do

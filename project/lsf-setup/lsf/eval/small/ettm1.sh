@@ -12,10 +12,10 @@ ps=128
 mode=S
 
 
-cpp1='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm1/cl4000_pl96/checkpoints/epoch_5-step_1254.ckpt'
-#cpp2='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm1/cl4000_pl192/checkpoints/epoch_2-step_624.ckpt'
-#cpp3='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm1/cl4000_pl336/checkpoints/epoch_1-step_414.ckpt'
-#cpp4='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/lsf/full/ettm1/cl4000_pl720/checkpoints/epoch_0-step_204.ckpt'
+cpp1='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl96/checkpoints/epoch_15-step_3344.ckpt'
+cpp2='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl192/checkpoints/epoch_6-step_1456.ckpt'
+cpp3='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl336/checkpoints/epoch_3-step_828.ckpt'
+cpp4='./outputs/lsf-setup/lsf/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl720/checkpoints/epoch_2-step_612.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

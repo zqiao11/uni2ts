@@ -12,7 +12,7 @@ mode=S  # M
 ft_pattern=full
 
 
-for pl in 720; do  # 96 192 336
+for pl in 96 192 336 720; do
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \
@@ -33,5 +33,5 @@ for pl in 720; do  # 96 192 336
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
   trainer.callbacks."1".monitor=val/PackedMSELoss \
-  trainer.callbacks."3".monitor=val/PackedMSELoss
+  trainer.callbacks."2".monitor=val/PackedMSELoss
 done

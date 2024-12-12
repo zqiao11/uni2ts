@@ -311,79 +311,14 @@ class MoiraiFinetune(L.LightningModule):
         decay = set()
         no_decay = set()
 
-        if "full" in self.finetune_pattern:
-            if "wo_head" in self.finetune_pattern:
-                for pn, p in self.named_parameters():
-                    if "param_proj" in pn:
-                        p.requires_grad = False
+        if self.finetune_pattern == 'full':
             pass
-        else:
-            for param in self.parameters():
-                param.requires_grad = False
-
-        # Unfreeze the corresponding params
-        if "param_proj" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "param_proj" in pn:
-                    p.requires_grad = True
-
-        if "in_proj" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "in_proj" in pn:
-                    p.requires_grad = True
-
-        if "norm" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "norm1" in pn or "norm2" in pn:
-                    p.requires_grad = True
-
-        if "mask" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "mask_encoding" in pn:
-                    p.requires_grad = True
-
-        if "ffn" in self.finetune_pattern:
+        elif self.finetune_pattern == 'freeze_ffn':
             for pn, p in self.named_parameters():
                 if "ffn" in pn:
-                    p.requires_grad = True
-
-        if "q_proj" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "q_proj" in pn:
-                    p.requires_grad = True
-
-        if "k_proj" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "k_proj" in pn:
-                    p.requires_grad = True
-
-        if "v_proj" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "v_proj" in pn:
-                    p.requires_grad = True
-
-        if "attn_norm" in self.finetune_pattern:  #
-            for pn, p in self.named_parameters():
-                if "self_attn.q_norm" in pn or "self_attn.k_norm" in pn:
-                    p.requires_grad = True
-
-        if "var_attn_bias" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "var_attn_bias" in pn:
-                    p.requires_grad = True
-
-        if "out_proj" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if "out_proj" in pn:
-                    p.requires_grad = True
-
-        if "studentT" in self.finetune_pattern:
-            for pn, p in self.named_parameters():
-                if (
-                    "param_proj.proj.components.0" in pn
-                    or "param_proj.proj.weights_logits" in pn
-                ):
-                    p.requires_grad = True
+                    p.requires_grad = False
+        else:
+            raise ValueError("Unsupported finetune pattern {}".format(self.finetune_pattern))
 
         whitelist_params = (
             LearnedProjection,

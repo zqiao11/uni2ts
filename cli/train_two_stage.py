@@ -204,10 +204,10 @@ def main(cfg: DictConfig):
         ckpt_path=cfg.ckpt_path,
     )
 
-    # Load the saved ckpt of the best model in stage 1
+    # Load the params in the saved ckpt of stage 1
     print("Finished warmup stage. Now loading the saved model and finetuning the whole model...")
     checkpoint = torch.load(get_best_checkpoint_path(trainer_warmup.callbacks[-1].dirpath))
-    model.load_state_dict(checkpoint["state_dict"])
+    model.load_state_dict(checkpoint["state_dict"], strict=False)
     model.current_stage = 2
 
     trainer.fit(

@@ -1,15 +1,15 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune
-exp_name=learned_time_id
+exp_name=attn_lora
 data=ettm1
 cl=4000
 ps=128
 mode=S
-ft_pattern=full
+ft_pattern=freeze_ffn
 
 
 for pl in 96 192 336 720; do

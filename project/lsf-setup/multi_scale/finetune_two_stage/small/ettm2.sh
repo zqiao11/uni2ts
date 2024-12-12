@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune_two_stage
-exp_name=direct_1full_2head
+exp_name=2stage_attn_lora
 data=ettm2
 cl=3000
 ps=64
@@ -32,6 +32,4 @@ for pl in 96 192 336 720; do
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   val_data.mode=${mode}
-#  trainer_warmup.callbacks."1".monitor=val/PackedMSELoss \
-#  trainer_warmup.callbacks."2".monitor=val/PackedMSELoss
 done

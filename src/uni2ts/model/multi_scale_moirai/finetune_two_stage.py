@@ -466,7 +466,8 @@ class TwoStageMoiraiFinetune(L.LightningModule):
 
             # validate that we considered every parameter
             param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
-            self.updated_params = {**self.updated_params, **param_dict}
+            self.updated_params = {**self.updated_params, **param_dict}  # ToDo: 记得改回来
+            # self.updated_params = param_dict
 
             inter_params = decay & no_decay
             union_params = decay | no_decay

@@ -33,5 +33,5 @@ for pl in 96 192 336 720; do
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
   trainer.callbacks."1".monitor=val/PackedMSELoss \
-  trainer.callbacks."3".monitor=val/PackedMSELoss
+  trainer.callbacks."2".monitor=val/PackedMSELoss
 done
