@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.0_R_small
 cp=conf/lsf-setup/multi_scale/finetune
-exp_name=attn_lora
+exp_name=scale_bias_10000
 data=ettm2
 cl=3000
 ps=64

@@ -23,7 +23,7 @@ class AddNewScaleContextSeries(CheckArrNDimMixin, Transformation):
 
     target_field: str
     ds_factor: int
-    num_new_scales_fields: tuple[str, ...]
+    new_scales_target_fields: tuple[str, ...]
     expected_ndim: int = 2
 
     def __post_init__(self):
@@ -34,13 +34,13 @@ class AddNewScaleContextSeries(CheckArrNDimMixin, Transformation):
 
     def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
         self.__post_init__()
-        for field in self.num_new_scales_fields:
+        for field in self.new_scales_target_fields:
             data_entry[field] = self._downsample(
                 data_entry,
                 self.target_field,
             )
 
-        for field in self.num_new_scales_fields:
+        for field in self.new_scales_target_fields:
             self.context_length_new_scales[field] = self.new_context_length_list[
                 int(field[-1])
             ]

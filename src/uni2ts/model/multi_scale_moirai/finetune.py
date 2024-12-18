@@ -33,11 +33,12 @@ from uni2ts.loss.packed import (
 )
 from uni2ts.module.norm import RMSNorm
 from uni2ts.module.position import (
-    BinaryAttentionBias,
     LearnedEmbedding,
     LearnedProjection,
-    MultiScaleRotaryProjection
 )
+
+from uni2ts.module.multi_scale.attn_bias import BinaryAttentionBias
+
 from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
 from uni2ts.transform import (
@@ -144,14 +145,19 @@ class MoiraiFinetune(L.LightningModule):
         """
         Initialize the new params added for Multi Scale.
         """
-        # ToDo: for time id & in_proj
+        # # ToDo: for time id & in_proj
         # self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.patch_size)
 
-        for layer in self.module.encoder.layers:
-            # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
-            if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
-                # Call post_init() method of the GroupedQueryAttention object
-                layer.self_attn.init_multi_scale_modules(self.num_new_scales, self.r, self.alpha)
+        # for layer in self.module.encoder.layers:
+        #     # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
+        #     if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
+        #         # Call post_init() method of the GroupedQueryAttention object
+        #         layer.self_attn.init_multi_scale_modules(self.num_new_scales, self.r, self.alpha)
+
+        # Post init BinaryAttentionBias
+        for module in self.module.encoder.modules():
+            if isinstance(module, BinaryAttentionBias):
+                module.post_init(self.num_new_scales+1)
 
         # ToDo: for time id
         # for module in self.module.encoder.modules():
@@ -478,7 +484,7 @@ class MoiraiFinetune(L.LightningModule):
                 + AddNewScaleContextSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
-                    num_new_scales_fields=self.new_scales_target_fields,
+                    new_scales_target_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
                 # Pad down-sampled scales. Make sure their context and prediction are dividable by patch_size
@@ -617,7 +623,7 @@ class MoiraiFinetune(L.LightningModule):
                 + AddNewScaleContextSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
-                    num_new_scales_fields=self.new_scales_target_fields,
+                    new_scales_target_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
                 + PadNewScaleSeries(

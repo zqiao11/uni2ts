@@ -6,13 +6,13 @@ export CUDA_VISIBLE_DEVICES=2
 mode=S
 cp=conf/lsf-setup/multi_scale/eval
 exp_name=lsf
-cl=2000
+cl=3000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl96/checkpoints/epoch_18-step_27132.ckpt'
-cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl192/checkpoints/epoch_10-step_15664.ckpt'
-cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl336/checkpoints/epoch_4-step_7090.ckpt'
-cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl720/checkpoints/epoch_2-step_4206.ckpt'
+cpp1='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/2stage_attn_lora/full/ettm2/S/cl3000_pl96/checkpoints/epoch_17-step_7758.ckpt'
+cpp2='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/2stage_attn_lora/full/ettm2/S/cl3000_pl192/checkpoints/epoch_3-step_1716.ckpt'
+cpp3='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/2stage_attn_lora/full/ettm2/S/cl3000_pl336/checkpoints/epoch_1-step_854.ckpt'
+cpp4='./outputs/lsf-setup/multi_scale/finetune_two_stage/moirai_1.0_R_small/2stage_attn_lora/full/ettm2/S/cl3000_pl720/checkpoints/epoch_0-step_422.ckpt'
 
 index=1
 for pl in 96 192 336 720; do
@@ -30,12 +30,12 @@ for pl in 96 192 336 720; do
     -cp $cp \
     exp_name=$exp_name/$pretrained_model/$ft_pattern  \
     model=$model \
-    model.patch_size=128 \
+    model.patch_size=64 \
     model.context_length=$cl \
     model.checkpoint_path=$cpp \
     model.pretrained_checkpoint_path=ckpt/$pretrained_model.ckpt \
     data=lsf_test \
-    data.dataset_name=weather \
+    data.dataset_name=ETTm2 \
     data.mode=$mode \
     data.prediction_length=$pl
 

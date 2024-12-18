@@ -564,7 +564,7 @@ class TwoStageMoiraiFinetune(L.LightningModule):
                 + AddNewScaleContextSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
-                    num_new_scales_fields=self.new_scales_target_fields,
+                    new_scales_target_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
                 # Pad down-sampled scales. Make sure their context and prediction are dividable by patch_size
@@ -703,7 +703,7 @@ class TwoStageMoiraiFinetune(L.LightningModule):
                 + AddNewScaleContextSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
-                    num_new_scales_fields=self.new_scales_target_fields,
+                    new_scales_target_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
                 + PadNewScaleSeries(

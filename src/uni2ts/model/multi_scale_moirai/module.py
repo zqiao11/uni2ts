@@ -28,11 +28,10 @@ from torch.utils._pytree import tree_map
 from uni2ts.common.torch_util import mask_fill, packed_attention_mask
 from uni2ts.distribution import DistributionOutput
 from uni2ts.module.multi_scale.transformer import TransformerEncoder
+from uni2ts.module.multi_scale.attn_bias import BinaryAttentionBias
 from uni2ts.module.norm import RMSNorm
 from uni2ts.module.packed_scaler import PackedNOPScaler, PackedStdScaler
 from uni2ts.module.position import (
-    BinaryAttentionBias,
-    CrossVariateAttentionBias,
     QueryKeyProjection,
     RotaryProjection,
     MultiScaleRotaryProjection
@@ -120,8 +119,6 @@ class MoiraiModule(
             use_qk_norm=True,
             var_attn_bias_layer=partial(
                 BinaryAttentionBias
-                # CrossVariateAttentionBias,
-                # num_vars=4   # ToDo: 这个num_vars得提供外部接口
             ),
             time_qk_proj_layer=partial(
                 # QueryKeyProjection,
@@ -214,7 +211,7 @@ class MoiraiModule(
 
         reprs = self.in_proj(scaled_target, patch_size)
 
-        # ToDo: Add a specific in_proj for each scale
+        # # ToDo: Add a specific in_proj for each scale
         # reprs_all_scales = []
         # for i in range(0, self.num_scales):
         #     idx_scale_i = self.token_idx_per_scale[i]

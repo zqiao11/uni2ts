@@ -9,10 +9,10 @@ exp_name=lsf
 cl=4000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/attn_lora/freeze_ffn/ettm1/S/cl4000_pl96/checkpoints/epoch_33-step_14178.ckpt'
-cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/attn_lora/freeze_ffn/ettm1/S/cl4000_pl192/checkpoints/epoch_13-step_5824.ckpt'
-cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/attn_lora/freeze_ffn/ettm1/S/cl4000_pl336/checkpoints/epoch_6-step_2898.ckpt'
-cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/attn_lora/freeze_ffn/ettm1/S/cl4000_pl720/checkpoints/epoch_3-step_1632.ckpt'
+cpp1='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/ettm1/S/cl4000_pl96/checkpoints/epoch_9-step_4170.ckpt'
+cpp2='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/ettm1/S/cl4000_pl192/checkpoints/epoch_3-step_1664.ckpt'
+cpp3='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/ettm1/S/cl4000_pl336/checkpoints/epoch_1-step_828.ckpt'
+cpp4='./outputs/lsf-setup/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/ettm1/S/cl4000_pl720/checkpoints/epoch_1-step_816.ckpt'
 
 index=1
 for pl in 96 192 336 720; do
