@@ -1,0 +1,7 @@
+_target_: uni2ts.data.builder.pf_simple.generate_eval_builder
+dataset: walmart_eval
+offset: 103
+eval_length: 8
+prediction_length: ???
+context_length: ???
+patch_size: ???

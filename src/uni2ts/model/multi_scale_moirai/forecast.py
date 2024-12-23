@@ -155,10 +155,10 @@ class MoiraiForecast(L.LightningModule):
         #         # Call post_init() method of the GroupedQueryAttention object
         #         layer.self_attn.init_multi_scale_modules(self.num_new_scales, self.r, self.alpha)
 
-        # Post init BinaryAttentionBias
-        for module in self.module.encoder.modules():
-            if isinstance(module, BinaryAttentionBias):
-                module.post_init(self.num_new_scales+1)
+        # # Post init BinaryAttentionBias
+        # for module in self.module.encoder.modules():
+        #     if isinstance(module, BinaryAttentionBias):
+        #         module.post_init(self.num_new_scales+1)
 
         # ToDo: for time id
         # for module in self.module.encoder.modules():

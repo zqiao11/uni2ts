@@ -10,7 +10,7 @@ pl=24
 model=moirai_lightning_ckpt
 
 
-cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_small/pf/full/electricity/cl1000_pl24/checkpoints/epoch_0-step_656.ckpt'
+cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_small/pf/full/electricity/cl1000_pl24/checkpoints/epoch_0-step_15730.ckpt'
 
 
 pretrained_model=$(echo $cpp | cut -d'/' -f6)
@@ -25,5 +25,5 @@ python -m cli.eval \
   model.checkpoint_path=$cpp \
   model.pretrained_checkpoint_path=ckpt/$pretrained_model.ckpt \
   data=gluonts_test \
-  data.dataset_name=solar-energy \
+  data.dataset_name=electricity \
   data.prediction_length=$pl

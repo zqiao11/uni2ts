@@ -10,7 +10,7 @@ pl=144
 model=moirai_lightning_ckpt
 
 
-cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_small/pf/full/jena_weather/cl4000_pl144/checkpoints/epoch_33-step_476.ckpt'
+cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_small/pf/full/jena_weather/cl4000_pl144/checkpoints/epoch_4-step_9725.ckpt'
 
 
 pretrained_model=$(echo $cpp | cut -d'/' -f6)

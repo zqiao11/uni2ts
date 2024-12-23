@@ -1,0 +1,7 @@
+_target_: uni2ts.data.builder.pf_simple.generate_eval_builder
+dataset: jena_weather_eval
+offset: 51544
+eval_length: 144
+prediction_length: ???
+context_length: ???
+patch_size: ???

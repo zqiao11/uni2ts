@@ -177,7 +177,7 @@ def main(cfg: DictConfig):
     )
 
     # Validate before training, check the performance of original pretrained model.
-    # trainer.validate(model, datamodule=DataModule(cfg, train_dataset, val_dataset))
+    trainer.validate(model, datamodule=DataModule(cfg, train_dataset, val_dataset))
 
     trainer.fit(
         model,

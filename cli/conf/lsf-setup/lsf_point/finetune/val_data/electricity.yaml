@@ -1,7 +1,0 @@
-_target_: uni2ts.data.builder.simple.generate_eval_builder
-dataset: electricity_eval
-offset: 18412 # Same as _lsf_dataset.py
-eval_length: 2630 # Same as _lsf_dataset.py, test_length=5260
-prediction_length: ???
-context_length: ???
-patch_size: ???

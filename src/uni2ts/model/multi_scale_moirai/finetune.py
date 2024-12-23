@@ -346,6 +346,10 @@ class MoiraiFinetune(L.LightningModule):
             for pn, p in self.named_parameters():
                 if "ffn" in pn:
                     p.requires_grad = False
+        elif self.finetune_pattern == 'head_only':
+            for pn, p in self.named_parameters():
+                if "param_proj" not in pn:
+                    p.requires_grad = False
         else:
             raise ValueError("Unsupported finetune pattern {}".format(self.finetune_pattern))
 

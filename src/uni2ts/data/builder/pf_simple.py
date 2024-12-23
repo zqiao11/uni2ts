@@ -393,13 +393,11 @@ def generate_finetune_builder(
     patch_size: int,
     storage_path: Path = env.CUSTOM_DATA_PATH,
 ) -> SimpleFinetuneDatasetBuilder:
-    """
-    Set distance=1 for training data. Same as standard LSF setting.
-    """
+
     return SimpleFinetuneDatasetBuilder(
         dataset=dataset,
-        windows=(train_length - context_length) // prediction_length,
-        distance=prediction_length,
+        windows=train_length - context_length - prediction_length + 1,
+        distance=1,
         prediction_length=prediction_length,
         context_length=context_length,
         patch_size=patch_size,
@@ -416,9 +414,6 @@ def generate_eval_builder(
     patch_size: int,
     storage_path: Path = env.CUSTOM_DATA_PATH,
 ) -> SimpleEvalDatasetBuilder:
-    """
-    Set distance according to dataset. Decrease the number of validation samples to reduce computational cost.
-    """
 
     return SimpleEvalDatasetBuilder(
         dataset=dataset,
