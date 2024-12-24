@@ -33,14 +33,14 @@ trainer:
       mode: min
       save_top_k: 1
       every_n_epochs: 1
-    - _target_: lightning.pytorch.callbacks.EarlyStopping  # uni2ts.callbacks.earlystop.WarmupEarlyStopping
+      save_last: false
+    - _target_: lightning.pytorch.callbacks.EarlyStopping
       monitor: val/PackedNLLLoss
       min_delta: 0.0
       patience: 3
       mode: min
       strict: false
       verbose: true
-#      warmup_steps: 1
 
   max_epochs: 1000
   enable_progress_bar: true

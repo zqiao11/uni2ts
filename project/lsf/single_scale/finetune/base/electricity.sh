@@ -34,5 +34,5 @@ for pl in 96 192 336 720; do
   val_data.mode=${mode} \
   train_dataloader.batch_size=256 \
   model.lr=1e-5 \
-  trainer.callbacks.'3'.patience=1
+  trainer.callbacks.'2'.patience=1
 done

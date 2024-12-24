@@ -3,7 +3,7 @@
 export HYDRA_FULL_ERROR=1
 export CUDA_VISIBLE_DEVICES=1
 
-cp=conf/pf/single_scale/eval
+cp=conf/pf/multi_scale/eval
 cl=1000
 pl=24
 model=moirai_lightning_ckpt

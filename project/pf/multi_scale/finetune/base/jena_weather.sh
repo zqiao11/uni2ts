@@ -1,16 +1,16 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_base
-cp=conf/pf/single_scale/finetune
+cp=conf/pf/multi_scale/finetune
 exp_name=default
-cl=1000
-pl=24
-ft_pattern=full
+cl=5000
+pl=144
+ft_pattern=freeze_ffn
 
-data=electricity
-ps=32
+data=jena_weather
+ps=128
 
 python -m cli.train \
 -cp $cp \
@@ -28,7 +28,4 @@ data.prediction_length=$pl \
 val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
-val_data.prediction_length=$pl \
-trainer.callback.1.save_last=true \
-trainer.callback.2.patience=5 \
-trainer.max_epochs=5
+val_data.prediction_length=$pl

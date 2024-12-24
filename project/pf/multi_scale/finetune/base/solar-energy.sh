@@ -3,14 +3,14 @@
 export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_base
-cp=conf/pf/single_scale/finetune
-exp_name=default
-cl=1000
+cp=conf/pf/multi_scale/finetune
+exp_name=lr5e-6
+cl=4000
 pl=24
-ft_pattern=full
+ft_pattern=freeze_ffn
 
-data=electricity
-ps=32
+data=solar-energy
+ps=64
 
 python -m cli.train \
 -cp $cp \
@@ -29,6 +29,4 @@ val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
-trainer.callback.1.save_last=true \
-trainer.callback.2.patience=5 \
-trainer.max_epochs=5
+model.lr=5e-6

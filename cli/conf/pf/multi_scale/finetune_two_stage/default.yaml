@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: outputs/pf/multi_scale/finetune_two_stage/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${data.mode}/${run_name}
+    dir: outputs/pf/multi_scale/finetune_two_stage/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${run_name}
 defaults:
   - model: ???
   - data: ???
@@ -69,6 +69,7 @@ trainer:
       mode: min
       save_top_k: 1
       every_n_epochs: 1
+      save_last: false
     - _target_: lightning.pytorch.callbacks.EarlyStopping
       monitor: val/PackedNLLLoss
       min_delta: 0.0

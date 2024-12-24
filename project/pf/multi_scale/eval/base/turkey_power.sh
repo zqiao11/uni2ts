@@ -1,15 +1,15 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=2
 
-cp=conf/pf/single_scale/eval
+cp=conf/pf/multi_scale/eval
 cl=1000
 pl=24
 model=moirai_lightning_ckpt
 
 
-cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_base/pf/full/istanbul_traffic/cl1000_pl24/checkpoints/epoch_196-step_15169.ckpt'
+cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_base/pf/full/electricity/cl1000_pl24/checkpoints/epoch_1-step_31460.ckpt'
 
 
 pretrained_model=$(echo $cpp | cut -d'/' -f6)
@@ -20,10 +20,10 @@ python -m cli.eval \
   -cp $cp \
   exp_name=$exp_name/$pretrained_model/$ft_pattern  \
   model=$model \
-  model.patch_size=32 \
+  model.patch_size=64 \
   model.context_length=$cl \
   model.checkpoint_path=$cpp \
   model.pretrained_checkpoint_path=ckpt/$pretrained_model.ckpt \
   data=gluonts_test \
-  data.dataset_name=istanbul_traffic \
+  data.dataset_name=turkey_power \
   data.prediction_length=$pl

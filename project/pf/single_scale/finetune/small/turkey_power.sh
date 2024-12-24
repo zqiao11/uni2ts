@@ -28,4 +28,5 @@ data.prediction_length=$pl \
 val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
-val_data.prediction_length=$pl
+val_data.prediction_length=$pl \
+trainer.callbacks.'2'.patience=10

@@ -3,11 +3,11 @@
 export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_base
-cp=conf/pf/single_scale/finetune
+cp=conf/pf/multi_scale/finetune
 exp_name=default
 cl=1000
 pl=24
-ft_pattern=full
+ft_pattern=freeze_ffn
 
 data=electricity
 ps=32

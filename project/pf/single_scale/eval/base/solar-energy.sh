@@ -9,7 +9,7 @@ pl=24
 model=moirai_lightning_ckpt
 
 
-cpp=''
+cpp='./outputs/pf-setup/pf/finetune/moirai_1.0_R_base/pf/full/solar-energy/cl4000_pl24/checkpoints/epoch_17-step_43794.ckpt'
 
 
 pretrained_model=$(echo $cpp | cut -d'/' -f6)

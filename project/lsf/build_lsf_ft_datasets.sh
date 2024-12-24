@@ -3,7 +3,7 @@ set -a
 source .env
 set +a
 
-ds_type="wide_multivariate"  # "wide_multivariate"
+ds_type="wide"  # "wide_multivariate"
 path_prefix=$LSF_PATH
 
 for data in ETTh1 ETTh2; do
