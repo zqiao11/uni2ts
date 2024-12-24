@@ -44,7 +44,7 @@ step_size = 12
 gap_size = 0.75  # 微小的间隔，单位是时间步
 
 tick_fontsize = 20  # x轴刻度字体大小
-label_fontsize = 24  # x轴标题字体大小
+label_fontsize = 32  # x轴标题字体大小
 
 
 # 绘制完整时间序列
@@ -68,7 +68,8 @@ plt.xlim(0, len(target))
 plt.yticks([])
 # plt.title("Full Time Series")
 plt.xlabel("Time Steps", fontsize=label_fontsize)
-plt.xticks(fontsize=tick_fontsize)
+plt.xticks([])
+# plt.xticks(fontsize=tick_fontsize)
 # plt.ylabel("Target Value")
 # plt.legend()
 plt.tight_layout()
@@ -89,7 +90,8 @@ for start_idx in range(0, len(context_ds2), step_size):
 plt.xlim(0, len(context_ds2))
 plt.yticks([])
 plt.xlabel("Time Steps", fontsize=label_fontsize)
-plt.xticks(fontsize=tick_fontsize)
+plt.xticks([])
+# plt.xticks(fontsize=tick_fontsize)
 plt.tight_layout()
 plt.show()
 
@@ -109,7 +111,8 @@ for start_idx in range(0, len(context_ds4), step_size):
 plt.xlim(0, len(context_ds4))
 plt.yticks([])
 plt.xlabel("Time Steps", fontsize=label_fontsize)
-plt.xticks(fontsize=tick_fontsize)
+plt.xticks([])
+# plt.xticks(fontsize=tick_fontsize)
 plt.tight_layout()
 plt.show()
 
