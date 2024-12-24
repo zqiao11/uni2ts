@@ -8,7 +8,7 @@ exp_name=default
 data=etth1
 cl=5000
 ps=64
-mode=M
+mode=S
 ft_pattern=full
 
 

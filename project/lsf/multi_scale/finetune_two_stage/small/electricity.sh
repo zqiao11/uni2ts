@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune_two_stage
-exp_name=default
+exp_name=lr5e-6
 data=electricity
 cl=5000
 ps=64

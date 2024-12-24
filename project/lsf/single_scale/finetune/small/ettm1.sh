@@ -4,12 +4,12 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/single_scale/finetune
-exp_name=direct_ft
+exp_name=default
 data=ettm1
 cl=4000
 ps=128
 mode=S
-ft_pattern=freeze_ffn
+ft_pattern=full
 
 
 for pl in 96 192 336 720; do
