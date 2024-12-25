@@ -101,7 +101,8 @@ class AddNewScaleSeries(CheckArrNDimMixin, Transformation):
     """
 
     target_field: str
-    num_new_scales: int
+    ds_factor: int
+    new_scales_target_fields: tuple[str, ...]
     expected_ndim: int = 2
 
     def __post_init__(self):
@@ -114,19 +115,19 @@ class AddNewScaleSeries(CheckArrNDimMixin, Transformation):
 
     def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
         self.__post_init__()
-        for i in range(self.num_new_scales):
-            data_entry[f"target{i+1}"] = self._downsample(
+        for field in self.new_scales_target_fields:
+            data_entry[field] = self._downsample(
                 data_entry,
                 self.target_field,
             )
 
-        for i in range(self.num_new_scales):
-            self.context_length_new_scales[f"target{i+1}"] = (
-                self.new_context_length_list[i]
-            )
-            self.prediction_length_new_scales[f"target{i+1}"] = (
-                self.new_prediction_length_list[i]
-            )
+        for field in self.new_scales_target_fields:
+            self.context_length_new_scales[field] = self.new_context_length_list[
+                int(field[-1])
+            ]
+            self.prediction_length_new_scales[field] = self.new_prediction_length_list[
+                int(field[-1])
+            ]
         data_entry["context_length_new_scales"] = self.context_length_new_scales
         data_entry["prediction_length_new_scales"] = self.prediction_length_new_scales
 
@@ -142,7 +143,7 @@ class AddNewScaleSeries(CheckArrNDimMixin, Transformation):
 
         self.check_ndim(field, arr, self.expected_ndim)
         dim, time = arr.shape[:2]
-        ds_factor = 2
+        ds_factor = self.ds_factor
 
         if len(self.new_context_length_list) == 0:
             context_length = data_entry["context_length"]

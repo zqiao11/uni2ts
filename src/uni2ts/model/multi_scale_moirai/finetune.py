@@ -42,6 +42,7 @@ from uni2ts.module.multi_scale.attn_bias import BinaryAttentionBias
 from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
 from uni2ts.transform import (
+    AddNewScaleSeries,
     AddNewScaleContextSeries,
     AddObservedMask,
     AddSampleIndex,
@@ -485,6 +486,12 @@ class MoiraiFinetune(L.LightningModule):
                     optional_fields=("past_feat_dynamic_real",),
                 )
                 #  QZ: Apply downsample to target. Create a new field 'target{i}' for each scale.
+                # + AddNewScaleSeries(
+                #     target_field="target",
+                #     ds_factor=self.ds_factor,
+                #     new_scales_target_fields=self.new_scales_target_fields,
+                #     expected_ndim=2,
+                # )
                 + AddNewScaleContextSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
@@ -624,6 +631,12 @@ class MoiraiFinetune(L.LightningModule):
                     fields=("target",),
                     optional_fields=("past_feat_dynamic_real",),
                 )
+                # + AddNewScaleSeries(
+                #     target_field="target",
+                #     ds_factor=self.ds_factor,
+                #     new_scales_target_fields=self.new_scales_target_fields,
+                #     expected_ndim=2,
+                # )
                 + AddNewScaleContextSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
