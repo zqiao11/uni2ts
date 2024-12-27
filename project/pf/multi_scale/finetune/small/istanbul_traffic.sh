@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.0_R_small
 cp=conf/pf/multi_scale/finetune
-exp_name=default
+exp_name=in_proj_attn_lora
 cl=4000
 pl=24
 ft_pattern=freeze_ffn
