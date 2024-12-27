@@ -33,6 +33,8 @@ for pl in 96 192 336 720; do
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
   train_dataloader.batch_size=256 \
-  model.lr=1e-5 \
-  trainer.callbacks.'2'.patience=1
+  trainer.callbacks.'2'.patience=1 \
+  model.lr=1e-6 \
+  trainer.callbacks.1.save_last=true \
+  trainer.max_epochs=3
 done

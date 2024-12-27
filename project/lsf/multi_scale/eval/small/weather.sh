@@ -8,10 +8,10 @@ cp=conf/lsf/multi_scale/eval
 cl=2000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl96/checkpoints/epoch_18-step_27132.ckpt'
-cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl192/checkpoints/epoch_10-step_15664.ckpt'
-cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl336/checkpoints/epoch_4-step_7090.ckpt'
-cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/scale_bias_10000/freeze_ffn/weather/S/cl2000_pl720/checkpoints/epoch_2-step_4206.ckpt'
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_scale_in_adaptor_freezeInProj_attnLora_lr5e-6/freeze_ffn/weather/S/cl2000_pl96/checkpoints/epoch_5-step_8568.ckpt'
+cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_scale_in_adaptor_freezeInProj_attnLora_lr5e-6/freeze_ffn/weather/S/cl2000_pl192/checkpoints/epoch_4-step_7120.ckpt'
+cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_scale_in_adaptor_freezeInProj_attnLora_lr5e-6/freeze_ffn/weather/S/cl2000_pl336/checkpoints/epoch_1-step_2836.ckpt'
+cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_scale_in_adaptor_freezeInProj_attnLora_lr5e-6/freeze_ffn/weather/S/cl2000_pl720/checkpoints/epoch_1-step_2804.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

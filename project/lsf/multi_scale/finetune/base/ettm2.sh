@@ -31,5 +31,6 @@ for pl in 96 192 336 720; do
   val_data.patch_size=${ps} \
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
-  val_data.mode=${mode}
+  val_data.mode=${mode} \
+  model.lr=5e-6
 done

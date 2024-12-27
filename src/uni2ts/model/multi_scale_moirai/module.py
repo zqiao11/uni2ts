@@ -141,7 +141,7 @@ class MoiraiModule(
         self.time_id_q_proj = nn.ParameterList()
         self.time_id_k_proj = nn.ParameterList()
 
-        self.in_proj_new_scales = nn.ParameterList()
+        self.in_proj_adaptors = nn.ParameterList()
 
     def forward(
         self,
@@ -212,20 +212,12 @@ class MoiraiModule(
         reprs = self.in_proj(scaled_target, patch_size)
 
         # # ToDo: Add a specific in_proj for each scale
-        # reprs_all_scales = []
-        # for i in range(0, self.num_scales):
-        #     idx_scale_i = self.token_idx_per_scale[i]
-        #
-        #     if i == 0:
-        #         reprs_base = self.in_proj(scaled_target[..., idx_scale_i, :], patch_size[..., idx_scale_i])
-        #         reprs_all_scales.append(reprs_base)
-        #
-        #     else:
-        #         reprs_new_scale = self.in_proj_new_scales[i - 1](scaled_target[..., idx_scale_i, :], patch_size[..., idx_scale_i])
-        #         reprs_all_scales.append(reprs_new_scale)
-        #
-        # reprs = torch.cat(reprs_all_scales, dim=-2)
-
+        reprs_all_scales = []
+        for i in range(0, self.num_scales):
+            idx_scale_i = self.token_idx_per_scale[i]
+            reprs_new_scale = self.in_proj_adaptors[i](reprs[..., idx_scale_i, :])
+            reprs_all_scales.append(reprs_new_scale)
+        reprs = torch.cat(reprs_all_scales, dim=-2)
 
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
 
@@ -248,11 +240,20 @@ class MoiraiModule(
         self.ps = patch_size
 
         # Assign Q and K for each new scale
-        for scale in range(1, self.num_scales):
-            self.time_id_q_proj.append(nn.Linear(self.ps, self.ps))
-            self.time_id_k_proj.append(nn.Linear(self.ps, self.ps))
+        # for scale in range(1, self.num_scales):
+        #     self.time_id_q_proj.append(nn.Linear(self.ps, self.ps))
+        #     self.time_id_k_proj.append(nn.Linear(self.ps, self.ps))
 
-            self.in_proj_new_scales.append(copy.deepcopy(self.in_proj))
+        # 每个scale一个FC layer做input proj的adaptation
+        for scale in range(0, self.num_scales):
+            in_proj_adaptor = nn.Linear(self.d_model, self.d_model)
+            # 初始化为单位矩阵
+            with torch.no_grad():
+                in_proj_adaptor.weight.copy_(torch.eye(self.d_model))
+                in_proj_adaptor.bias.zero_()
+
+            self.in_proj_adaptors.append(in_proj_adaptor)
+        self.in_proj.requires_grad_(False)  # 冻住in_proj
 
     def generate_segmented_attn_mask(self, query, key, k):
         """

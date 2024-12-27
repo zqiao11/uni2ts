@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=default
+exp_name=all_scale_in_adaptor_freezeInProj_attnLora_lr5e-6
 data=weather
 cl=2000
 ps=128
@@ -33,5 +33,6 @@ for pl in 96 192 336 720; do
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
   trainer.callbacks."1".monitor=val/PackedMSELoss \
-  trainer.callbacks."2".monitor=val/PackedMSELoss
+  trainer.callbacks."2".monitor=val/PackedMSELoss \
+  model.lr=5e-6
 done

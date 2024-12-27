@@ -35,5 +35,6 @@ for pl in 96 192 336 720; do
   trainer.callbacks."1".monitor=val/PackedMSELoss \
   trainer.callbacks."2".monitor=val/PackedMSELoss \
   trainer_warmup.callbacks."1".monitor=val/PackedMSELoss \
-  trainer_warmup.callbacks."2".monitor=val/PackedMSELoss
+  trainer_warmup.callbacks."2".monitor=val/PackedMSELoss \
+  model.lr=5e-6
 done

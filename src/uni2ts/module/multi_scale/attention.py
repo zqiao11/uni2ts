@@ -312,32 +312,32 @@ class GroupedQueryAttention(nn.Module):
         kv_time_id: Optional[Int[torch.Tensor, "*batch kv_len"]] = None,
     ) -> Float[torch.Tensor, "*batch q_len dim"]:
 
-        query = self.q_proj(query)
-        key = self.k_proj(key)
-        value = self.v_proj(value)
+        # query = self.q_proj(query)
+        # key = self.k_proj(key)
+        # value = self.v_proj(value)
 
-        # # ToDO: Apply lora for each scale
-        # updated_query = query.clone()
-        # updated_key = key.clone()
-        # updated_value = value.clone()
-        #
-        # if self.num_new_scales is not None:
-        #     index_by_variate = self.get_token_index_by_variate(query_var_id)
-        #     assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
-        #
-        #     for i in range(1 + self.num_new_scales):
-        #         index = index_by_variate[i]
-        #         query_scale = query[..., index, :]
-        #         key_scale = key[..., index, :]
-        #         value_scale = value[..., index, :]
-        #
-        #         updated_query[..., index, :] = self.apply_lora(query_scale, self.q_proj, self.q_A[i], self.q_B[i])
-        #         updated_key[..., index, :] = self.apply_lora(key_scale, self.k_proj, self.k_A[i], self.k_B[i])
-        #         updated_value[..., index, :] = self.apply_lora(value_scale, self.v_proj, self.v_A[i], self.v_B[i])
-        #
-        # query = updated_query
-        # key = updated_key
-        # value = updated_value
+        # ToDO: Apply lora for each scale
+        updated_query = query.clone()
+        updated_key = key.clone()
+        updated_value = value.clone()
+
+        if self.num_new_scales is not None:
+            index_by_variate = self.get_token_index_by_variate(query_var_id)
+            assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
+
+            for i in range(1 + self.num_new_scales):
+                index = index_by_variate[i]
+                query_scale = query[..., index, :]
+                key_scale = key[..., index, :]
+                value_scale = value[..., index, :]
+
+                updated_query[..., index, :] = self.apply_lora(query_scale, self.q_proj, self.q_A[i], self.q_B[i])
+                updated_key[..., index, :] = self.apply_lora(key_scale, self.k_proj, self.k_A[i], self.k_B[i])
+                updated_value[..., index, :] = self.apply_lora(value_scale, self.v_proj, self.v_A[i], self.v_B[i])
+
+        query = updated_query
+        key = updated_key
+        value = updated_value
 
         query = self.q_norm(
             rearrange(

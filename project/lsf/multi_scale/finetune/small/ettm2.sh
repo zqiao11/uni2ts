@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=default
+exp_name=all_scale_in_adaptor_freezeInProj_attnLora_lr5e-6
 data=ettm2
 cl=3000
 ps=64
@@ -31,5 +31,6 @@ for pl in 96 192 336 720; do
   val_data.patch_size=${ps} \
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
-  val_data.mode=${mode}
+  val_data.mode=${mode} \
+  model.lr=5e-6
 done
