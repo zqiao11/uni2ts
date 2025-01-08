@@ -174,32 +174,9 @@ class MoiraiModule(
         :return: predictive distribution
         """
 
-        # ToDo: Map time id for new scales.
-        # # Key: base scale context tokens; Value: base scale time id
-        # time_id = time_id.to(torch.float)
-        # idx_kv = self.base_ctx_token_idx
-        # key = target[..., idx_kv, :self.ps].clone()  # (bs, len0, dim)
-        # value = time_id[..., idx_kv].clone().unsqueeze(-1).to(dtype=torch.float)  # (bs, len0, 1)
-        #
-        # for i in range(1, self.num_scales):
-        #     idx_scale_i = self.token_idx_per_scale[i]
-        #
-        #     query = target[..., idx_scale_i, :self.ps].clone()   # (bs, leni, dim)
-        #     query = self.time_id_q_proj[i - 1](query)
-        #     key = self.time_id_k_proj[i - 1](key)  # (bs, len0, dim)
-        #
-        #     # Generate attn_mask. Make sure each query only attend to the keys in its down-sampling range.
-        #     attn_mask = self.generate_segmented_attn_mask(query, key, 2**i)
-        #
-        #     # mapped_time_id is float time id on the original scale. (bs, len_i, 1)
-        #     mapped_time_id = F.scaled_dot_product_attention(
-        #         query,
-        #         key,
-        #         value,
-        #         attn_mask=attn_mask,
-        #     )
-        #
-        #     time_id[..., idx_scale_i] = mapped_time_id.squeeze()
+        for i in range(1, self.num_scales):
+            idx_scale_i = self.token_idx_per_scale[i]  # 包含ctx和pred
+            time_id[..., idx_scale_i] = time_id[..., idx_scale_i] * (2 ** i)
 
         loc, scale = self.scaler(
             target,
@@ -221,6 +198,34 @@ class MoiraiModule(
 
         masked_reprs = mask_fill(reprs, prediction_mask, self.mask_encoding.weight)
 
+        # # ToDo: Map time id for new scales.
+        # # Key: base scale context tokens; Value: base scale time id
+        # time_id = time_id.to(torch.float)
+        # idx_kv = self.base_ctx_token_idx
+        # # idx_kv = self.token_idx_per_scale[0]
+        # key = masked_reprs[..., idx_kv, :self.ps].clone()  # (bs, len0, dim)
+        # value = time_id[..., idx_kv].clone().unsqueeze(-1).to(dtype=torch.float)  # (bs, len0, 1)
+        #
+        # for i in range(1, self.num_scales):
+        #     idx_scale_i = self.token_idx_per_scale[i]  # 包含ctx和pred
+        #
+        #     query = masked_reprs[..., idx_scale_i, :].clone()  # (bs, leni, dim)
+        #     query = self.time_id_q_proj[i - 1](query)
+        #     key = self.time_id_k_proj[i - 1](key)  # (bs, len0, dim)
+        #
+        #     # Generate attn_mask. Make sure each query only attend to the keys in its down-sampling range.
+        #     attn_mask = self.generate_segmented_attn_mask(query, key, 2 ** i)
+        #
+        #     # mapped_time_id is float time id on the original scale. (bs, len_i, 1)
+        #     mapped_time_id = F.scaled_dot_product_attention(
+        #         query,
+        #         key,
+        #         value,
+        #         attn_mask=attn_mask,
+        #     )
+        #
+        #     time_id[..., idx_scale_i] = mapped_time_id.squeeze()
+
         reprs = self.encoder(
             masked_reprs,
             packed_attention_mask(sample_id),
@@ -229,7 +234,7 @@ class MoiraiModule(
         )  # (bs, seq_len, max_patch)
         distr_param = self.param_proj(reprs, patch_size)
         distr = self.distr_output.distribution(distr_param, loc=loc, scale=scale)
-        return distr
+        return distr, distr_param
 
     def post_init(self, token_idx_per_scale, base_ctx_token_idx, patch_size):
         self.token_idx_per_scale = token_idx_per_scale
@@ -240,9 +245,9 @@ class MoiraiModule(
         self.ps = patch_size
 
         # Assign Q and K for each new scale
-        # for scale in range(1, self.num_scales):
-        #     self.time_id_q_proj.append(nn.Linear(self.ps, self.ps))
-        #     self.time_id_k_proj.append(nn.Linear(self.ps, self.ps))
+        for scale in range(1, self.num_scales):
+            self.time_id_q_proj.append(nn.Linear(self.d_model, self.d_model))
+            self.time_id_k_proj.append(nn.Linear(self.d_model, self.d_model))
 
         # 每个scale一个FC layer做input proj的adaptation
         for scale in range(0, self.num_scales):

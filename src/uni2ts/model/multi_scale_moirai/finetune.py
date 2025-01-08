@@ -35,6 +35,7 @@ from uni2ts.module.norm import RMSNorm
 from uni2ts.module.position import (
     LearnedEmbedding,
     LearnedProjection,
+    MultiScaleRotaryProjection
 )
 
 from uni2ts.module.multi_scale.attn_bias import BinaryAttentionBias
@@ -123,6 +124,7 @@ class MoiraiFinetune(L.LightningModule):
         alpha: int = 16,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
+        scale_weight_lr: float = 1e-3
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
@@ -141,6 +143,8 @@ class MoiraiFinetune(L.LightningModule):
 
         # Lora config
         self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
+
+        self.scale_weights = nn.Parameter(torch.ones(1+num_new_scales))
 
     def post_init(self):
         """
@@ -161,9 +165,9 @@ class MoiraiFinetune(L.LightningModule):
         #         module.post_init(self.num_new_scales+1)
 
         # ToDo: for time id
-        # for module in self.module.encoder.modules():
-        #     if isinstance(module, MultiScaleRotaryProjection):
-        #         module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
+        for module in self.module.encoder.modules():
+            if isinstance(module, MultiScaleRotaryProjection):
+                module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
 
         if self.lora_config is not None:
             self.module = LoraModel(self.module, self.lora_config, "default")
@@ -181,14 +185,22 @@ class MoiraiFinetune(L.LightningModule):
     def _get_token_idx_per_scale(self):
         base_token_len = math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
         ctx_len = self.context_length
+        pred_len = self.prediction_length
         new_scale_token_len = []
 
         # New scales only include context part.
         for i in range(self.num_new_scales):
+            # ctx_len = math.ceil(ctx_len / self.ds_factor)
+            # ctx_token_len = math.ceil(ctx_len / self.patch_size)
+            #
+            # new_scale_token_len.append(ctx_token_len)
+
             ctx_len = math.ceil(ctx_len / self.ds_factor)
             ctx_token_len = math.ceil(ctx_len / self.patch_size)
+            pred_len = math.ceil(pred_len / self.ds_factor)
+            pred_token_len = math.ceil(pred_len / self.patch_size)
+            new_scale_token_len.append(ctx_token_len+pred_token_len)
 
-            new_scale_token_len.append(ctx_token_len)
 
         token_idx_per_scale = [list(range(base_token_len))]
 
@@ -214,7 +226,7 @@ class MoiraiFinetune(L.LightningModule):
         prediction_mask: Bool[torch.Tensor, "*batch seq_len"],
         patch_size: Int[torch.Tensor, "*batch seq_len"],
     ) -> Distribution:
-        distr = self.module(
+        distr, distr_param = self.module(
             target=target,
             observed_mask=observed_mask,
             sample_id=sample_id,
@@ -225,25 +237,71 @@ class MoiraiFinetune(L.LightningModule):
         )
         return distr
 
+    def slice_distr_param(self, distr_param, token_index):
+        """
+        Slices the tensors in the dictionary along the second dimension.
+
+        """
+
+        def slice_nested_structure(data):
+            if isinstance(data, torch.Tensor):  # Check if the data is a tensor
+                # Check if tensor needs slicing by its dimensions
+                if len(data.shape) >= 2:
+                    # Slice along the second dimension (dim=1)
+                    return data[:, token_index, :]
+                else:
+                    # components.1.'scale' is a Tensor with shape 0
+                    return data
+            elif isinstance(data, dict):  # Recursively process dictionaries
+                return {key: slice_nested_structure(value) for key, value in data.items()}
+            elif isinstance(data, list):  # Recursively process lists
+                return [slice_nested_structure(item) for item in data]
+            else:  # Return the data as-is if it's not a tensor or container
+                return data
+
+        return slice_nested_structure(distr_param)
+
+
     def training_step(
         self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
-        distr = self(
+        distr, distr_param = self.module(
             **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
         )
-        loss = self.hparams.loss_func(
-            pred=distr,
-            **{
-                field: batch[field]
-                for field in [
-                    "target",
-                    "prediction_mask",
-                    "observed_mask",
-                    "sample_id",
-                    "variate_id",
-                ]
-            },
-        )
+
+        loc, scale = distr.loc, distr.scale
+
+        target = batch["target"]
+        prediction_mask = batch["prediction_mask"]
+        observed_mask = batch["observed_mask"]
+        sample_id = batch["sample_id"]
+        variate_id = batch["variate_id"]
+
+        loss = 0
+        scale_weight = torch.softmax(self.scale_weights, dim=0)
+
+        for i in range(1+self.num_new_scales):
+            token_idx = self.token_idx_per_scale[i]
+            distr_param_i = self.slice_distr_param(distr_param, token_idx)
+
+            distr_i = self.module.distr_output.distribution(
+                distr_param_i,
+                loc=loc[..., token_idx, :],
+                scale=scale[..., token_idx, :]
+            )
+
+            loss_i = self.hparams.loss_func(
+                pred=distr_i,
+                target=target[..., token_idx, :],
+                prediction_mask=prediction_mask[..., token_idx],
+                observed_mask=observed_mask[..., token_idx, :],
+                sample_id=sample_id[..., token_idx],
+                variate_id=variate_id[..., token_idx]
+            )
+
+            loss += loss_i * scale_weight[i]
+
+
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
@@ -263,22 +321,42 @@ class MoiraiFinetune(L.LightningModule):
     def validation_step(
         self, batch: dict[str, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
-        distr = self(
+        distr, distr_param = self.module(
             **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
         )
-        val_loss = self.hparams.loss_func(
-            pred=distr,
-            **{
-                field: batch[field]
-                for field in [
-                    "target",
-                    "prediction_mask",
-                    "observed_mask",
-                    "sample_id",
-                    "variate_id",
-                ]
-            },
-        )
+
+        loc, scale = distr.loc, distr.scale
+
+        target = batch["target"]
+        prediction_mask = batch["prediction_mask"]
+        observed_mask = batch["observed_mask"]
+        sample_id = batch["sample_id"]
+        variate_id = batch["variate_id"]
+
+        val_loss = 0
+        scale_weight = torch.softmax(self.scale_weights, dim=0)
+
+        for i in range(1 + self.num_new_scales):
+            token_idx = self.token_idx_per_scale[i]
+            distr_param_i = self.slice_distr_param(distr_param, token_idx)
+
+            distr_i = self.module.distr_output.distribution(
+                distr_param_i,
+                loc=loc[..., token_idx, :],
+                scale=scale[..., token_idx, :]
+            )
+
+            loss_i = self.hparams.loss_func(
+                pred=distr_i,
+                target=target[..., token_idx, :],
+                prediction_mask=prediction_mask[..., token_idx],
+                observed_mask=observed_mask[..., token_idx, :],
+                sample_id=sample_id[..., token_idx],
+                variate_id=variate_id[..., token_idx]
+            )
+
+            val_loss += loss_i * scale_weight[i]
+
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
@@ -340,6 +418,7 @@ class MoiraiFinetune(L.LightningModule):
     def configure_optimizers(self) -> dict:
         decay = set()
         no_decay = set()
+        scale_weights_params = set()
 
         if self.finetune_pattern == 'full':
             pass
@@ -386,9 +465,14 @@ class MoiraiFinetune(L.LightningModule):
                     decay.add(fpn)
                 elif 'v_A' in pn or 'v_B' in pn:
                     decay.add(fpn)
+                elif 'scale_weights' in pn:
+                    decay.add(fpn)
 
                 # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj
                 #     decay.add(fpn)
+
+                if 'scale_weights' in pn:
+                    scale_weights_params.add(fpn)
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
@@ -397,15 +481,17 @@ class MoiraiFinetune(L.LightningModule):
         inter_params = decay & no_decay
         union_params = decay | no_decay
         assert (
-            len(inter_params) == 0
+                len(inter_params) == 0
         ), f"parameters {str(inter_params)} made it into both decay/no_decay sets!"
         assert (
-            len(param_dict.keys() - union_params) == 0
+                len(param_dict.keys() - union_params) == 0
         ), f"parameters {str(param_dict.keys() - union_params)} were not separated into either decay/no_decay set!"
         assert (
-            len(union_params - param_dict.keys()) == 0
+                len(union_params - param_dict.keys()) == 0
         ), f"parameters {str(union_params - param_dict.keys())} were not included in param_dict!"
 
+        # Separate the scale_weights_params and others
+        decay = decay - scale_weights_params
 
         optim_groups = [
             {
@@ -421,6 +507,14 @@ class MoiraiFinetune(L.LightningModule):
                     [param_dict[pn] for pn in sorted(list(no_decay))],
                 ),
                 "weight_decay": 0.0,
+            },
+            {
+                "params": filter(
+                    lambda p: p.requires_grad,
+                    [param_dict[pn] for pn in sorted(list(scale_weights_params))],
+                ),
+                "lr": self.hparams.scale_weight_lr,
+                "weight_decay": self.hparams.weight_decay,
             },
         ]
 
@@ -486,18 +580,18 @@ class MoiraiFinetune(L.LightningModule):
                     optional_fields=("past_feat_dynamic_real",),
                 )
                 #  QZ: Apply downsample to target. Create a new field 'target{i}' for each scale.
-                # + AddNewScaleSeries(
-                #     target_field="target",
-                #     ds_factor=self.ds_factor,
-                #     new_scales_target_fields=self.new_scales_target_fields,
-                #     expected_ndim=2,
-                # )
-                + AddNewScaleContextSeries(
+                + AddNewScaleSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
                     new_scales_target_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
+                # + AddNewScaleContextSeries(
+                #     target_field="target",
+                #     ds_factor=self.ds_factor,
+                #     new_scales_target_fields=self.new_scales_target_fields,
+                #     expected_ndim=2,
+                # )
                 # Pad down-sampled scales. Make sure their context and prediction are dividable by patch_size
                 + PadNewScaleSeries(
                     fields=self.new_scales_target_fields,
@@ -631,18 +725,18 @@ class MoiraiFinetune(L.LightningModule):
                     fields=("target",),
                     optional_fields=("past_feat_dynamic_real",),
                 )
-                # + AddNewScaleSeries(
-                #     target_field="target",
-                #     ds_factor=self.ds_factor,
-                #     new_scales_target_fields=self.new_scales_target_fields,
-                #     expected_ndim=2,
-                # )
-                + AddNewScaleContextSeries(
+                + AddNewScaleSeries(
                     target_field="target",
                     ds_factor=self.ds_factor,
                     new_scales_target_fields=self.new_scales_target_fields,
                     expected_ndim=2,
                 )
+                # + AddNewScaleContextSeries(
+                #     target_field="target",
+                #     ds_factor=self.ds_factor,
+                #     new_scales_target_fields=self.new_scales_target_fields,
+                #     expected_ndim=2,
+                # )
                 + PadNewScaleSeries(
                     fields=self.new_scales_target_fields,
                     optional_fields=("past_feat_dynamic_real",),

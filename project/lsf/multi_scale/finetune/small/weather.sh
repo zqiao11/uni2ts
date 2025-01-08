@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=all_scale_in_adaptor_freezeInProj_attnLora_lr5e-6
+exp_name=all_tid_naive_times
 data=weather
 cl=2000
 ps=128
@@ -34,5 +34,6 @@ for pl in 96 192 336 720; do
   val_data.mode=${mode} \
   trainer.callbacks."1".monitor=val/PackedMSELoss \
   trainer.callbacks."2".monitor=val/PackedMSELoss \
-  model.lr=5e-6
+  model.lr=5e-6 \
+  model.scale_weight_lr=1e-4
 done

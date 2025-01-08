@@ -51,3 +51,5 @@ lora_kwargs:
   target_modules: ["q_proj", "k_proj", "v_proj"]
   lora_alpha: 32
   lora_dropout: 0.05
+
+scale_weight_lr: 1e-4

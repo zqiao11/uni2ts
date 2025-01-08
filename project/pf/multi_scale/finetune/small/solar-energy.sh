@@ -29,4 +29,4 @@ val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
-lr=5e-6
+model.lr=5e-6

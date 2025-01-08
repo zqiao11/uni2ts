@@ -50,8 +50,8 @@ label_fontsize = 32  # x轴标题字体大小
 # 绘制完整时间序列
 plt.figure(figsize=(full_width, height))
 # 绘制完整时间序列，并设置预测部分的透明度
-plt.plot(np.arange(len(target[:ctx_len])), target[:ctx_len], label="Target Series", color="blue")  # 绘制上下文部分
-plt.plot(np.arange(ctx_len, len(target)), target[ctx_len:], label="Prediction Area", color="blue", alpha=0.3)  # 绘制预测部分，透明度0.3
+plt.plot(np.arange(len(target[:ctx_len])), target[:ctx_len], label="Target Series", color="blue", linewidth=4)  # 绘制上下文部分
+plt.plot(np.arange(ctx_len, len(target)), target[ctx_len:], label="Prediction Area", color="blue", alpha=0.3, linewidth=4)  # 绘制预测部分，透明度0.3
 
 # 为预测区域添加灰色填充（透明度调整）
 plt.axvspan(ctx_len, len(target), color='gray', alpha=0.3)  # alpha 控制透明度，数值越小越透明
@@ -77,7 +77,7 @@ plt.show()
 
 
 plt.figure(figsize=(context_width, height))
-plt.plot(np.arange(len(context_ds2)), context_ds2, label="Context Series", color="green")
+plt.plot(np.arange(len(context_ds2)), context_ds2, label="Context Series", color="green", linewidth=4)
 
 # 添加虚线方框（浅灰色，虚线，粗线）
 for start_idx in range(0, len(context_ds2), step_size):
@@ -98,7 +98,7 @@ plt.show()
 
 # ToDo: width不是和time steps成比例。是固定的原scale的context部分的长度
 plt.figure(figsize=(context_width, height))
-plt.plot(np.arange(len(context_ds4)), context_ds4, label="Context Series", color="orange")
+plt.plot(np.arange(len(context_ds4)), context_ds4, label="Context Series", color="orange", linewidth=4)
 
 # 添加虚线方框（浅灰色，虚线，粗线）
 for start_idx in range(0, len(context_ds4), step_size):

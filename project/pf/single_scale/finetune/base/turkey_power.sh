@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_base
 cp=conf/pf/single_scale/finetune
-exp_name=patience30
+exp_name=lr5e-6_patience30
 cl=1000
 pl=24
 ft_pattern=full
@@ -30,4 +30,5 @@ val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
 trainer.callbacks.'2'.patience=30 \
-trainer.callbacks.1.save_last=true
+trainer.callbacks.1.save_last=true \
+model.lr=5e-6
