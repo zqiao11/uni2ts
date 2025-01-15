@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune

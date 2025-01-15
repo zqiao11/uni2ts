@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=default
+exp_name=weighted_loss_mfc_1e-5
 data=etth1
 cl=5000
 ps=64
@@ -31,5 +31,8 @@ for pl in 96 192 336 720; do
   val_data.patch_size=${ps} \
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
-  val_data.mode=${mode}
+  val_data.mode=${mode} \
+  model.lr=1e-5 \
+  model.scale_weight_lr=1e-5 \
+  model.temperature=10
 done
