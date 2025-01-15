@@ -122,6 +122,7 @@ class MoiraiFinetune(L.LightningModule):
         ds_factor: int = 2,
         r: int = 16,
         alpha: int = 16,
+        temperature: int = 1,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
         scale_weight_lr: float = 1e-3
@@ -138,20 +139,20 @@ class MoiraiFinetune(L.LightningModule):
         self.ds_factor = ds_factor
         self.r = r
         self.alpha = alpha
+        self.temperature = temperature
 
-        self.token_idx_per_scale, self.base_ctx_token_idx = self._get_token_idx_per_scale()
+        self.token_idx_per_scale = self._get_token_idx_per_scale()
+        self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
 
         # Lora config
         self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
-
-        self.scale_weights = nn.Parameter(torch.ones(1+num_new_scales))
 
     def post_init(self):
         """
         Initialize the new params added for Multi Scale.
         """
         # # ToDo: for time id & in_proj
-        self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.patch_size)
+        self.module.post_init(self.token_idx_per_scale)
 
         for layer in self.module.encoder.layers:
             # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
@@ -167,7 +168,14 @@ class MoiraiFinetune(L.LightningModule):
         # ToDo: for time id
         for module in self.module.encoder.modules():
             if isinstance(module, MultiScaleRotaryProjection):
-                module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
+                module.post_init(self.token_idx_per_scale)
+
+        self.scale_weight_fc = nn.Linear(
+            in_features=self.module.d_model * (self.num_new_scales+1),
+            out_features=self.num_new_scales+1
+        )
+        nn.init.zeros_(self.scale_weight_fc.weight)  # 初始化权重为0
+        nn.init.zeros_(self.scale_weight_fc.bias)  # 初始化偏置为0
 
         if self.lora_config is not None:
             self.module = LoraModel(self.module, self.lora_config, "default")
@@ -188,19 +196,12 @@ class MoiraiFinetune(L.LightningModule):
         pred_len = self.prediction_length
         new_scale_token_len = []
 
-        # New scales only include context part.
         for i in range(self.num_new_scales):
-            # ctx_len = math.ceil(ctx_len / self.ds_factor)
-            # ctx_token_len = math.ceil(ctx_len / self.patch_size)
-            #
-            # new_scale_token_len.append(ctx_token_len)
-
             ctx_len = math.ceil(ctx_len / self.ds_factor)
             ctx_token_len = math.ceil(ctx_len / self.patch_size)
             pred_len = math.ceil(pred_len / self.ds_factor)
             pred_token_len = math.ceil(pred_len / self.patch_size)
             new_scale_token_len.append(ctx_token_len+pred_token_len)
-
 
         token_idx_per_scale = [list(range(base_token_len))]
 
@@ -211,10 +212,32 @@ class MoiraiFinetune(L.LightningModule):
             index = list(range(start, end))
             token_idx_per_scale.append(index)
 
-        base_ctx_token_len = math.ceil(self.context_length / self.patch_size)
-        base_ctx_token_idx = list(range(base_ctx_token_len))
+        return token_idx_per_scale
 
-        return token_idx_per_scale, base_ctx_token_idx
+    def _get_num_pred_tokens_per_scale(self):
+        all_scale_pred_token_len = []
+        pred_len = self.prediction_length
+
+        for i in range(self.num_new_scales+1):
+            pred_len = math.ceil(pred_len / self.ds_factor)
+            pred_token_len = math.ceil(pred_len / self.patch_size)
+            all_scale_pred_token_len.append(pred_token_len)
+
+        return all_scale_pred_token_len
+
+    def _get_pred_token_idx_per_scale(self):
+
+        token_idx_per_scale = self._get_token_idx_per_scale()
+        all_scale_pred_token_len = self._get_num_pred_tokens_per_scale()
+
+        pred_token_idx_per_scale = []
+
+        for i in range(self.num_new_scales+1):
+            scale_idx = token_idx_per_scale[i]
+            num_pred_tokens = all_scale_pred_token_len[i]
+            pred_token_idx_per_scale.append(scale_idx[-num_pred_tokens:])
+        # all_pred_token_idx = [item for sublist in pred_token_idx_per_scale for item in sublist]
+        return pred_token_idx_per_scale
 
     def forward(
         self,
@@ -226,7 +249,7 @@ class MoiraiFinetune(L.LightningModule):
         prediction_mask: Bool[torch.Tensor, "*batch seq_len"],
         patch_size: Int[torch.Tensor, "*batch seq_len"],
     ) -> Distribution:
-        distr, distr_param = self.module(
+        distr, _ = self.module(
             target=target,
             observed_mask=observed_mask,
             sample_id=sample_id,
@@ -237,70 +260,46 @@ class MoiraiFinetune(L.LightningModule):
         )
         return distr
 
-    def slice_distr_param(self, distr_param, token_index):
-        """
-        Slices the tensors in the dictionary along the second dimension.
-
-        """
-
-        def slice_nested_structure(data):
-            if isinstance(data, torch.Tensor):  # Check if the data is a tensor
-                # Check if tensor needs slicing by its dimensions
-                if len(data.shape) >= 2:
-                    # Slice along the second dimension (dim=1)
-                    return data[:, token_index, :]
-                else:
-                    # components.1.'scale' is a Tensor with shape 0
-                    return data
-            elif isinstance(data, dict):  # Recursively process dictionaries
-                return {key: slice_nested_structure(value) for key, value in data.items()}
-            elif isinstance(data, list):  # Recursively process lists
-                return [slice_nested_structure(item) for item in data]
-            else:  # Return the data as-is if it's not a tensor or container
-                return data
-
-        return slice_nested_structure(distr_param)
-
-
     def training_step(
         self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
-        distr, distr_param = self.module(
+        distr, reprs = self.module(
             **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
         )
+        loss_mix = self.hparams.loss_func(  # (bs, len, ps)
+            pred=distr,
+            return_loss_batchwise=True,
+            **{
+                field: batch[field]
+                for field in [
+                    "target",
+                    "prediction_mask",
+                    "observed_mask",
+                    "sample_id",
+                    "variate_id",
+                ]
+            },
+        )
 
-        loc, scale = distr.loc, distr.scale
+        # Compute each sample's scale_weight
+        sw_fc_input = []
+        for i in range(1 + self.num_new_scales):
+            pred_token_idx = self.pred_token_idx_per_scale[i]
+            masked_reprs = reprs[..., pred_token_idx, :].detach()
+            sw_fc_input.append(masked_reprs.mean(dim=1))
+        sw_fc_input = torch.concat(sw_fc_input, dim=-1)
+        scale_weight = torch.softmax(
+            self.scale_weight_fc(sw_fc_input) / self.temperature,
+            dim=1
+        )
 
-        target = batch["target"]
-        prediction_mask = batch["prediction_mask"]
-        observed_mask = batch["observed_mask"]
-        sample_id = batch["sample_id"]
-        variate_id = batch["variate_id"]
-
+        # Compute weighted loss
         loss = 0
-        scale_weight = torch.softmax(self.scale_weights, dim=0)
-
         for i in range(1+self.num_new_scales):
             token_idx = self.token_idx_per_scale[i]
-            distr_param_i = self.slice_distr_param(distr_param, token_idx)
-
-            distr_i = self.module.distr_output.distribution(
-                distr_param_i,
-                loc=loc[..., token_idx, :],
-                scale=scale[..., token_idx, :]
-            )
-
-            loss_i = self.hparams.loss_func(
-                pred=distr_i,
-                target=target[..., token_idx, :],
-                prediction_mask=prediction_mask[..., token_idx],
-                observed_mask=observed_mask[..., token_idx, :],
-                sample_id=sample_id[..., token_idx],
-                variate_id=variate_id[..., token_idx]
-            )
-
-            loss += loss_i * scale_weight[i]
-
+            loss_i = loss_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
+            loss += loss_i * (2 ** i) * scale_weight[:, i]  # weight loss per sample by ds_factor & scale_weight
+        loss = loss.sum()
 
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
@@ -321,41 +320,43 @@ class MoiraiFinetune(L.LightningModule):
     def validation_step(
         self, batch: dict[str, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
-        distr, distr_param = self.module(
+        distr, reprs = self.module(
             **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
         )
+        loss_mix = self.hparams.loss_func(  # (bs, len, ps)
+            pred=distr,
+            return_loss_batchwise=True,
+            **{
+                field: batch[field]
+                for field in [
+                    "target",
+                    "prediction_mask",
+                    "observed_mask",
+                    "sample_id",
+                    "variate_id",
+                ]
+            },
+        )
 
-        loc, scale = distr.loc, distr.scale
+        # Compute each sample's scale_weight
+        sw_fc_input = []
+        for i in range(1+self.num_new_scales):
+            pred_token_idx = self.pred_token_idx_per_scale[i]
+            masked_reprs = reprs[..., pred_token_idx, :].detach()
+            sw_fc_input.append(masked_reprs.mean(dim=1))
+        sw_fc_input = torch.concat(sw_fc_input, dim=-1)
+        scale_weight = torch.softmax(
+            self.scale_weight_fc(sw_fc_input) / self.temperature,
+            dim=1
+        )
 
-        target = batch["target"]
-        prediction_mask = batch["prediction_mask"]
-        observed_mask = batch["observed_mask"]
-        sample_id = batch["sample_id"]
-        variate_id = batch["variate_id"]
-
+        # Compute weighted loss
         val_loss = 0
-        scale_weight = torch.softmax(self.scale_weights, dim=0)
-
         for i in range(1 + self.num_new_scales):
             token_idx = self.token_idx_per_scale[i]
-            distr_param_i = self.slice_distr_param(distr_param, token_idx)
-
-            distr_i = self.module.distr_output.distribution(
-                distr_param_i,
-                loc=loc[..., token_idx, :],
-                scale=scale[..., token_idx, :]
-            )
-
-            loss_i = self.hparams.loss_func(
-                pred=distr_i,
-                target=target[..., token_idx, :],
-                prediction_mask=prediction_mask[..., token_idx],
-                observed_mask=observed_mask[..., token_idx, :],
-                sample_id=sample_id[..., token_idx],
-                variate_id=variate_id[..., token_idx]
-            )
-
-            val_loss += loss_i * scale_weight[i]
+            loss_i = loss_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
+            val_loss += loss_i * (2 ** i) * scale_weight[:, i]  # weight loss per sample by ds_factor & scale_weight
+        val_loss = val_loss.sum()
 
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
@@ -387,8 +388,9 @@ class MoiraiFinetune(L.LightningModule):
                 else:
                     raise ValueError(f"Unsupported loss function: {metric_func}")
 
-                metric = metric_func(
+                metric_mix = metric_func(
                     pred=pred,
+                    return_loss_batchwise=True,
                     **{
                         field: batch[field]
                         for field in [
@@ -400,6 +402,29 @@ class MoiraiFinetune(L.LightningModule):
                         ]
                     },
                 )
+
+                # ToDo: 这些metrics没有进行scale加权，但不影响训练
+                # metric = metric.sum()
+
+                # Compute each sample's scale_weight
+                sw_fc_input = []
+                for i in range(1 + self.num_new_scales):
+                    pred_token_idx = self.pred_token_idx_per_scale[i]
+                    masked_reprs = reprs[..., pred_token_idx, :].detach()
+                    sw_fc_input.append(masked_reprs.mean(dim=1))
+                sw_fc_input = torch.concat(sw_fc_input, dim=-1)
+                scale_weight = torch.softmax(
+                    self.scale_weight_fc(sw_fc_input) / self.temperature,
+                    dim=1
+                )
+
+                # Compute weighted metric
+                metric = 0
+                for i in range(1 + self.num_new_scales):
+                    token_idx = self.token_idx_per_scale[i]
+                    metric_i = metric_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
+                    metric += metric_i * (2 ** i) * scale_weight[:, i]
+                metric = metric.sum()
 
                 self.log(
                     f"val/{metric_func.__class__.__name__}",
@@ -418,7 +443,7 @@ class MoiraiFinetune(L.LightningModule):
     def configure_optimizers(self) -> dict:
         decay = set()
         no_decay = set()
-        scale_weights_params = set()
+        scale_weight_params = set()
 
         if self.finetune_pattern == 'full':
             pass
@@ -465,14 +490,14 @@ class MoiraiFinetune(L.LightningModule):
                     decay.add(fpn)
                 elif 'v_A' in pn or 'v_B' in pn:
                     decay.add(fpn)
-                elif 'scale_weights' in pn:
-                    decay.add(fpn)
+                # elif 'scale_weight' in pn:
+                #     decay.add(fpn)
 
                 # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj
                 #     decay.add(fpn)
 
-                if 'scale_weights' in pn:
-                    scale_weights_params.add(fpn)
+                if 'scale_weight' in pn:
+                    scale_weight_params.add(fpn)
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
@@ -490,8 +515,9 @@ class MoiraiFinetune(L.LightningModule):
                 len(union_params - param_dict.keys()) == 0
         ), f"parameters {str(union_params - param_dict.keys())} were not included in param_dict!"
 
-        # Separate the scale_weights_params and others
-        decay = decay - scale_weights_params
+        # Separate the scale_weight_params and others
+        decay = decay - scale_weight_params
+        no_decay = no_decay - scale_weight_params
 
         optim_groups = [
             {
@@ -511,7 +537,7 @@ class MoiraiFinetune(L.LightningModule):
             {
                 "params": filter(
                     lambda p: p.requires_grad,
-                    [param_dict[pn] for pn in sorted(list(scale_weights_params))],
+                    [param_dict[pn] for pn in sorted(list(scale_weight_params))],
                 ),
                 "lr": self.hparams.scale_weight_lr,
                 "weight_decay": self.hparams.weight_decay,

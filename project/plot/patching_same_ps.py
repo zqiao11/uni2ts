@@ -43,35 +43,32 @@ window_size = 12
 step_size = 12
 gap_size = 0.75  # 微小的间隔，单位是时间步
 
-tick_fontsize = 20  # x轴刻度字体大小
-label_fontsize = 32  # x轴标题字体大小
+tick_fontsize = 32  # x轴刻度字体大小
+label_fontsize = 40  # x轴标题字体大小
 
 
 # 绘制完整时间序列
-plt.figure(figsize=(full_width, height))
+plt.figure(figsize=(context_width, height))
 # 绘制完整时间序列，并设置预测部分的透明度
 plt.plot(np.arange(len(target[:ctx_len])), target[:ctx_len], label="Target Series", color="blue", linewidth=4)  # 绘制上下文部分
-plt.plot(np.arange(ctx_len, len(target)), target[ctx_len:], label="Prediction Area", color="blue", alpha=0.3, linewidth=4)  # 绘制预测部分，透明度0.3
-
-# 为预测区域添加灰色填充（透明度调整）
-plt.axvspan(ctx_len, len(target), color='gray', alpha=0.3)  # alpha 控制透明度，数值越小越透明
+# plt.plot(np.arange(ctx_len, len(target)), target[ctx_len:], label="Prediction Area", color="blue", alpha=0.3, linewidth=4)  # 绘制预测部分，透明度0.3
 
 # 添加虚线方框（浅灰色，虚线，粗线）
-for start_idx in range(0, len(target), step_size):
+for start_idx in range(0, len(context), step_size):
     end_idx = start_idx + window_size
     bias = 0.25 if start_idx == 0 else 0
-    if end_idx <= len(target):
+    if end_idx <= len(context):
         # 微调上下边框的位置，给每个窗口的上下边框留些间隙
         plt.axvspan(start_idx + bias, end_idx - gap_size,  ymin=0.01, ymax=0.99, facecolor='none', edgecolor='gray', linestyle='--', linewidth=4)
 
-plt.xlim(0, len(target))
+# 为预测区域添加灰色填充（透明度调整）
+plt.axvspan(12, 24, color='gray', alpha=0.3)  # alpha 控制透明度，数值越小越透明
+
+plt.xlim(0, len(context))
 plt.yticks([])
-# plt.title("Full Time Series")
 plt.xlabel("Time Steps", fontsize=label_fontsize)
-plt.xticks([])
-# plt.xticks(fontsize=tick_fontsize)
-# plt.ylabel("Target Value")
-# plt.legend()
+# plt.xticks([])
+plt.xticks(fontsize=tick_fontsize)
 plt.tight_layout()
 plt.show()
 
@@ -87,11 +84,14 @@ for start_idx in range(0, len(context_ds2), step_size):
         # 微调上下边框的位置，给每个窗口的上下边框留些间隙
         plt.axvspan(start_idx + bias/2, end_idx - gap_size/2,  ymin=0.01, ymax=0.99, facecolor='none', edgecolor='gray', linestyle='--', linewidth=4)
 
+# 为预测区域添加灰色填充（透明度调整）
+plt.axvspan(12, 24, color='gray', alpha=0.3)  # alpha 控制透明度，数值越小越透明
+
 plt.xlim(0, len(context_ds2))
 plt.yticks([])
 plt.xlabel("Time Steps", fontsize=label_fontsize)
-plt.xticks([])
-# plt.xticks(fontsize=tick_fontsize)
+# plt.xticks([])
+plt.xticks(fontsize=tick_fontsize)
 plt.tight_layout()
 plt.show()
 
@@ -108,11 +108,14 @@ for start_idx in range(0, len(context_ds4), step_size):
         # 微调上下边框的位置，给每个窗口的上下边框留些间隙
         plt.axvspan(start_idx + bias/4, end_idx - gap_size/4,  ymin=0.01, ymax=0.99, facecolor='none', edgecolor='gray', linestyle='--', linewidth=4)
 
+# 为预测区域添加灰色填充（透明度调整）
+plt.axvspan(12, 24, color='gray', alpha=0.3)  # alpha 控制透明度，数值越小越透明
+
 plt.xlim(0, len(context_ds4))
 plt.yticks([])
 plt.xlabel("Time Steps", fontsize=label_fontsize)
-plt.xticks([])
-# plt.xticks(fontsize=tick_fontsize)
+# plt.xticks([])
+plt.xticks(fontsize=tick_fontsize)
 plt.tight_layout()
 plt.show()
 

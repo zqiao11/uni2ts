@@ -38,6 +38,7 @@ class PackedLoss(abc.ABC):
         observed_mask: Optional[Bool[torch.Tensor, "*batch seq_len #dim"]] = None,
         sample_id: Optional[Int[torch.Tensor, "*batch seq_len"]] = None,
         variate_id: Optional[Int[torch.Tensor, "*batch seq_len"]] = None,
+        return_loss_batchwise: bool = False
     ) -> Float[torch.Tensor, ""]:
         """
         :param pred: predictions
@@ -48,6 +49,9 @@ class PackedLoss(abc.ABC):
         :param variate_id: integer array representing the variate id
         :return: loss
         """
+
+        self.return_loss_batchwise = return_loss_batchwise
+
         if observed_mask is None:
             observed_mask = torch.ones_like(target, dtype=torch.bool)
         if sample_id is None:
@@ -59,8 +63,8 @@ class PackedLoss(abc.ABC):
             pred, target, prediction_mask, observed_mask, sample_id, variate_id
         )
         return self.reduce_loss(
-            loss, prediction_mask, observed_mask, sample_id, variate_id
-        )
+                loss, prediction_mask, observed_mask, sample_id, variate_id
+            )
 
     @abc.abstractmethod
     def _loss_func(
@@ -103,7 +107,10 @@ class PackedLoss(abc.ABC):
         ) * prediction_mask.unsqueeze(-1)
         nobs = torch.where(nobs == 0, nobs, 1 / nobs).sum()
         loss = safe_div(loss, tobs * nobs)
-        return (loss * mask).sum()
+        if self.return_loss_batchwise:
+            return loss * mask   # (loss * mask).sum(dim=(-1, -2))
+        else:
+            return (loss * mask).sum()
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"

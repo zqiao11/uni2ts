@@ -53,3 +53,4 @@ lora_kwargs:
   lora_dropout: 0.05
 
 scale_weight_lr: 1e-4
+temperature: 1

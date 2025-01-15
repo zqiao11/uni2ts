@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=all_tid_naive_times
+exp_name=weighted_loss_mfc_1e-5
 data=ettm2
 cl=3000
 ps=64
@@ -12,7 +12,7 @@ mode=S
 ft_pattern=freeze_ffn
 
 
-for pl in 96 192 336 720; do
+for pl in 96 192 336 720; do  #
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \
@@ -32,6 +32,7 @@ for pl in 96 192 336 720; do
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
-  model.lr=5e-6 \
-  model.scale_weight_lr=1e-2
+  model.lr=5e-5 \
+  model.scale_weight_lr=5e-5 \
+  model.temperature=10
 done

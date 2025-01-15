@@ -1,17 +1,17 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 mode=S
 cp=conf/lsf/multi_scale/eval
 cl=3000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_tid_naive_times/freeze_ffn/ettm2/S/cl3000_pl96/checkpoints/epoch_11-step_5172.ckpt'
-cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_tid_naive_times/freeze_ffn/ettm2/S/cl3000_pl192/checkpoints/epoch_9-step_4290.ckpt'
-cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_tid_naive_times/freeze_ffn/ettm2/S/cl3000_pl336/checkpoints/epoch_3-step_1708.ckpt'
-cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/all_tid_naive_times/freeze_ffn/ettm2/S/cl3000_pl720/checkpoints/epoch_0-step_422.ckpt'
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_1e-5/freeze_ffn/ettm2/S/cl3000_pl96/checkpoints/epoch_39-step_17240.ckpt'
+cpp2=''
+cpp3=''
+cpp4=''
 
 index=1
 for pl in 96 192 336 720; do

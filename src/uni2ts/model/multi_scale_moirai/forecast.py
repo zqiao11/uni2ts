@@ -112,6 +112,7 @@ class MoiraiForecast(L.LightningModule):
         ds_factor: int = 2,
         r: int = 16,
         alpha: int = 16,
+        temperature: int = 1,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
     ):
@@ -127,17 +128,18 @@ class MoiraiForecast(L.LightningModule):
         self.ds_factor = ds_factor
         self.r = r
         self.alpha = alpha
+        self.temperature = temperature
 
         self.strict_loading = False
 
-        self.token_idx_per_scale, self.base_ctx_token_idx = self._get_token_idx_per_scale()
+        self.token_idx_per_scale = self._get_token_idx_per_scale()
+        self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
 
         # Set Lora for Moirai
         if use_lora:
             self.lora_config = LoraConfig(**lora_kwargs)
             self.module = LoraModel(self.module, self.lora_config, "default")
 
-        self.scale_weights = nn.Parameter(torch.ones(1 + num_new_scales))
         self.post_init()
 
 
@@ -147,7 +149,7 @@ class MoiraiForecast(L.LightningModule):
         Initialize the new params added for Multi Scale.
         """
         # # ToDo: for time id & in_proj
-        self.module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx, self.hparams.patch_size)
+        self.module.post_init(self.token_idx_per_scale)
 
         for layer in self.module.encoder.layers:
             # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
@@ -161,12 +163,18 @@ class MoiraiForecast(L.LightningModule):
         #         module.post_init(self.num_new_scales+1)
 
         # ToDo: for time id
-        # for module in self.module.encoder.modules():
-        #     if isinstance(module, MultiScaleRotaryProjection):
-        #         module.post_init(self.token_idx_per_scale, self.base_ctx_token_idx)
+        for module in self.module.encoder.modules():
+            if isinstance(module, MultiScaleRotaryProjection):
+                module.post_init(self.token_idx_per_scale)
+
+        self.scale_weight_fc = nn.Linear(
+            in_features=self.module.d_model * (self.num_new_scales+1),
+            out_features=self.num_new_scales+1
+        )
+
+        self.print_weight = True
 
         pass
-
 
     def _get_token_idx_per_scale(self):
         base_token_len = math.ceil(self.hparams.context_length / self.hparams.patch_size) + math.ceil(self.hparams.prediction_length / self.hparams.patch_size)
@@ -174,13 +182,7 @@ class MoiraiForecast(L.LightningModule):
         pred_len = self.hparams.prediction_length
         new_scale_token_len = []
 
-        # New scales only include context part.
         for i in range(self.num_new_scales):
-            # ctx_len = math.ceil(ctx_len / self.ds_factor)
-            # ctx_token_len = math.ceil(ctx_len / self.hparams.patch_size)
-            #
-            # new_scale_token_len.append(ctx_token_len)
-
             ctx_len = math.ceil(ctx_len / self.ds_factor)
             ctx_token_len = math.ceil(ctx_len / self.hparams.patch_size)
             pred_len = math.ceil(pred_len / self.ds_factor)
@@ -196,10 +198,32 @@ class MoiraiForecast(L.LightningModule):
             index = list(range(start, end))
             token_idx_per_scale.append(index)
 
-        base_ctx_token_len = math.ceil(self.hparams.context_length / self.hparams.patch_size)
-        base_ctx_token_idx = list(range(base_ctx_token_len))
+        return token_idx_per_scale
 
-        return token_idx_per_scale, base_ctx_token_idx
+    def _get_num_pred_tokens_per_scale(self):
+        all_scale_pred_token_len = []
+        pred_len = self.hparams.prediction_length
+
+        for i in range(self.num_new_scales+1):
+            pred_len = math.ceil(pred_len / self.ds_factor)
+            pred_token_len = math.ceil(pred_len / self.hparams.patch_size)
+            all_scale_pred_token_len.append(pred_token_len)
+
+        return all_scale_pred_token_len
+
+    def _get_pred_token_idx_per_scale(self):
+
+        token_idx_per_scale = self._get_token_idx_per_scale()
+        all_scale_pred_token_len = self._get_num_pred_tokens_per_scale()
+
+        pred_token_idx_per_scale = []
+
+        for i in range(self.num_new_scales+1):
+            scale_idx = token_idx_per_scale[i]
+            num_pred_tokens = all_scale_pred_token_len[i]
+            pred_token_idx_per_scale.append(scale_idx[-num_pred_tokens:])
+        # all_pred_token_idx = [item for sublist in pred_token_idx_per_scale for item in sublist]
+        return pred_token_idx_per_scale
 
 
     @contextmanager
@@ -237,8 +261,6 @@ class MoiraiForecast(L.LightningModule):
         batch_size: int,
         device: str = "auto",
     ) -> PyTorchPredictor:
-
-        print("scale_weights: {}".format(torch.softmax(self.scale_weights, dim=0)))
 
         ts_fields = []
         if self.hparams.feat_dynamic_real_dim > 0:
@@ -373,160 +395,20 @@ class MoiraiForecast(L.LightningModule):
         ] = None,
         num_samples: Optional[int] = None,
     ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
-        if self.hparams.patch_size == "auto":
-            val_loss = []
-            preds = []
-            for patch_size in self.module.patch_sizes:
-                val_loss.append(
-                    self._val_loss(
-                        patch_size=patch_size,
-                        target=past_target[..., : self.past_length, :],
-                        observed_target=past_observed_target[
-                            ..., : self.past_length, :
-                        ],
-                        is_pad=past_is_pad[..., : self.past_length],
-                        feat_dynamic_real=(
-                            feat_dynamic_real[..., : self.past_length, :]
-                            if feat_dynamic_real is not None
-                            else None
-                        ),
-                        observed_feat_dynamic_real=(
-                            observed_feat_dynamic_real[..., : self.past_length, :]
-                            if observed_feat_dynamic_real is not None
-                            else None
-                        ),
-                        past_feat_dynamic_real=(
-                            past_feat_dynamic_real[
-                                ..., : self.hparams.context_length, :
-                            ]
-                            if past_feat_dynamic_real is not None
-                            else None
-                        ),
-                        past_observed_feat_dynamic_real=(
-                            past_observed_feat_dynamic_real[
-                                ..., : self.hparams.context_length, :
-                            ]
-                            if past_observed_feat_dynamic_real is not None
-                            else None
-                        ),
-                    )
-                )
-                distr = self._get_distr(
-                    patch_size,
-                    past_target[..., -self.hparams.context_length :, :],
-                    past_observed_target[..., -self.hparams.context_length :, :],
-                    past_is_pad[..., -self.hparams.context_length :],
-                    (
-                        feat_dynamic_real[..., -self.past_length :, :]
-                        if feat_dynamic_real is not None
-                        else None
-                    ),
-                    (
-                        observed_feat_dynamic_real[..., -self.past_length :, :]
-                        if observed_feat_dynamic_real is not None
-                        else None
-                    ),
-                    (
-                        past_feat_dynamic_real[..., -self.hparams.context_length :, :]
-                        if past_feat_dynamic_real is not None
-                        else None
-                    ),
-                    (
-                        past_observed_feat_dynamic_real[
-                            ..., -self.hparams.context_length :, :
-                        ]
-                        if past_observed_feat_dynamic_real is not None
-                        else None
-                    ),
-                )
-                preds.append(
-                    self._format_preds(
-                        patch_size,
-                        distr.sample(
-                            torch.Size((num_samples or self.hparams.num_samples,))
-                        ),
-                        past_target.shape[-1],
-                    )
-                )
-            val_loss = torch.stack(val_loss)
-            preds = torch.stack(preds)
-            idx = val_loss.argmin(dim=0)
-            return preds[idx, torch.arange(len(idx), device=idx.device)]
-        else:
-            distr, distr_param = self._get_distr(
-                self.hparams.patch_size,
-                past_target,
-                past_observed_target,
-                past_is_pad,
-                feat_dynamic_real,
-                observed_feat_dynamic_real,
-                past_feat_dynamic_real,
-                past_observed_feat_dynamic_real,
-            )
-            preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
-            return self._format_preds(
-                self.hparams.patch_size, preds, past_target.shape[-1]
-            )
-
-    def _val_loss(
-        self,
-        patch_size: int,
-        target: Float[torch.Tensor, "batch time tgt"],
-        observed_target: Bool[torch.Tensor, "batch time tgt"],
-        is_pad: Bool[torch.Tensor, "batch time"],
-        feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
-        observed_feat_dynamic_real: Optional[
-            Float[torch.Tensor, "batch time feat"]
-        ] = None,
-        past_feat_dynamic_real: Optional[
-            Float[torch.Tensor, "batch past_time past_feat"]
-        ] = None,
-        past_observed_feat_dynamic_real: Optional[
-            Float[torch.Tensor, "batch past_time past_feat"]
-        ] = None,
-    ) -> Float[torch.Tensor, "batch"]:
-        # convert format
-        (
-            target,
-            observed_mask,
-            sample_id,
-            time_id,
-            variate_id,
-            prediction_mask,
-        ) = self._convert(
-            patch_size,
-            past_target=target[..., : self.hparams.context_length, :],
-            past_observed_target=observed_target[..., : self.hparams.context_length, :],
-            past_is_pad=is_pad[..., : self.hparams.context_length],
-            future_target=target[..., self.hparams.context_length :, :],
-            future_observed_target=observed_target[
-                ..., self.hparams.context_length :, :
-            ],
-            future_is_pad=is_pad[..., self.hparams.context_length :],
-            feat_dynamic_real=feat_dynamic_real,
-            observed_feat_dynamic_real=observed_feat_dynamic_real,
-            past_feat_dynamic_real=past_feat_dynamic_real,
-            past_observed_feat_dynamic_real=past_observed_feat_dynamic_real,
+        distr, reprs = self._get_distr(
+            self.hparams.patch_size,
+            past_target,
+            past_observed_target,
+            past_is_pad,
+            feat_dynamic_real,
+            observed_feat_dynamic_real,
+            past_feat_dynamic_real,
+            past_observed_feat_dynamic_real,
         )
-        # get predictions
-        distr = self.module(
-            target,
-            observed_mask,
-            sample_id,
-            time_id,
-            variate_id,
-            prediction_mask,
-            torch.ones_like(time_id, dtype=torch.long) * patch_size,
+        preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
+        return self._format_preds(
+            self.hparams.patch_size, preds, past_target.shape[-1], reprs
         )
-        val_loss = self.per_sample_loss_func(
-            pred=distr,
-            target=target,
-            prediction_mask=prediction_mask,
-            observed_mask=observed_mask,
-            sample_id=sample_id,
-            variate_id=variate_id,
-        )
-        return val_loss
 
     def _get_distr(
         self,
@@ -565,7 +447,7 @@ class MoiraiForecast(L.LightningModule):
         )
 
         # get predictions
-        distr, distr_param = self.module(
+        distr, reprs = self.module(
             target,
             observed_mask,
             sample_id,
@@ -574,7 +456,7 @@ class MoiraiForecast(L.LightningModule):
             prediction_mask,
             torch.ones_like(time_id, dtype=torch.long) * patch_size,
         )
-        return distr, distr_param
+        return distr, reprs
 
     @staticmethod
     def _patched_seq_pad(
@@ -1073,15 +955,16 @@ class MoiraiForecast(L.LightningModule):
     #     )[..., : self.hparams.prediction_length, :]
     #     return preds.squeeze(-1)
 
-
     def _format_preds(
         self,
         patch_size: int,
         preds: Float[torch.Tensor, "sample batch combine_seq patch"],
         target_dim: int,
+        reprs: Float[torch.Tensor, "batch combine_seq"]
     ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
 
         preds_all_scales = []
+        sample = preds.size(0)
 
         for i in range(self.num_new_scales+1):
             if i == 0:
@@ -1117,7 +1000,23 @@ class MoiraiForecast(L.LightningModule):
                 preds_all_scales.append(preds_i)
 
         preds = None
-        weight = torch.softmax(self.scale_weights, dim=0)
+
+        sw_fc_input = []
+        for i in range(1+self.num_new_scales):
+            pred_token_idx = self.pred_token_idx_per_scale[i]
+            masked_reprs = reprs[..., pred_token_idx, :].detach()
+            sw_fc_input.append(masked_reprs.mean(dim=1))
+        sw_fc_input = torch.concat(sw_fc_input, dim=-1)
+        weight = torch.softmax(
+            self.scale_weight_fc(sw_fc_input) / self.temperature,
+            dim=1
+        )
+
+        if self.print_weight is True:
+            print("scale_weights: {}".format(weight))
+            self.print_weight = False
+
+        weight = repeat(weight, "bs k -> bs sample pred k", sample=sample, pred=self.hparams.prediction_length)
 
         for i in range(self.num_new_scales+1):
             preds_i = preds_all_scales[i]
@@ -1125,9 +1024,9 @@ class MoiraiForecast(L.LightningModule):
             scale_factor = self.hparams.prediction_length // seq_len
 
             if preds is None:
-                preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[i]
+                preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
             else:
-                preds += preds_i.repeat_interleave(scale_factor, dim=2) * weight[i]
+                preds += preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
 
         return preds.squeeze(-1)
 

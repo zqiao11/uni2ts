@@ -403,6 +403,57 @@ class GroupedQueryAttention(nn.Module):
         return self.out_proj(out)
 
 
+    #     # For query of each scale, map the all the kv_time_id to the same scale.
+    #     out = torch.zeros_like(query)
+    #     for i in range(self.num_new_scales+1):
+    #         index = index_by_variate[i]
+    #         query_i = query[..., :, :, index, :]               # ... group hpg q_len dim
+    #         query_i_time_id = query_time_id[..., :, :, index]  # "*batch #group #hpg q_len"
+    #         attn_mask_i = attn_mask[..., :, :, index, :]
+    #
+    #         mapped_kv_time_id = self.time_id_mapping(kv_time_id, index_by_variate, target_scale=i)
+    #
+    #         query_i, key = self._qk_proj(
+    #             query_i,
+    #             key,
+    #             query_var_id=query_var_id,
+    #             kv_var_id=kv_var_id,
+    #             query_time_id=query_i_time_id,
+    #             kv_time_id=mapped_kv_time_id,
+    #         )
+    #
+    #         out_i = F.scaled_dot_product_attention(
+    #             query_i,
+    #             key,
+    #             value,
+    #             attn_mask=attn_mask_i,
+    #             dropout_p=self.attn_dropout_p,
+    #             scale=self.softmax_scale,
+    #         )
+    #
+    #         out[..., :, :, index, :] = out_i
+    #     out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
+    #     return self.out_proj(out)
+    #
+    # def time_id_mapping(self, time_id,  index_by_variate, target_scale, factor=2):
+    #     """
+    #     Map time_id to target_scale
+    #      time_id: "*batch #group #hpg kv_len"
+    #     """
+    #
+    #     for i in range(0, self.num_new_scales+1):
+    #         if i == target_scale:
+    #             continue
+    #         else:
+    #             idx_scale_i = index_by_variate[i]  # 包含ctx和pred
+    #             time_id = time_id.to(torch.float)
+    #             time_id[..., :, :, idx_scale_i] = time_id[..., :, :, idx_scale_i] * (factor ** (i-target_scale))
+    #             # time_id[..., :, :, idx_scale_i] = time_id[..., :, :, idx_scale_i] + (2 ** i-1) * torch.sigmoid(self.time_id_bias[i])
+    #
+    #     return time_id
+
+
+
 class MultiQueryAttention(GroupedQueryAttention):
     def __init__(
         self,
