@@ -36,5 +36,5 @@ for pl in 96 192 336 720; do
   trainer.callbacks."2".monitor=val/PackedMSELoss \
   model.lr=5e-5 \
   model.scale_weight_lr=5e-5 \
-  model.temperature=100
+  model.temperature=10
 done
