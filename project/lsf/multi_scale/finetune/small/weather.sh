@@ -34,7 +34,7 @@ for pl in 96 192 336 720; do
   val_data.mode=${mode} \
   trainer.callbacks."1".monitor=val/PackedMSELoss \
   trainer.callbacks."2".monitor=val/PackedMSELoss \
-  model.lr=5e-5 \
-  model.scale_weight_lr=5e-5 \
+  model.lr=1e-5 \
+  model.scale_weight_lr=1e-5 \
   model.temperature=10
 done
