@@ -447,9 +447,9 @@ class GroupedQueryAttention(nn.Module):
     #         else:
     #             idx_scale_i = index_by_variate[i]  # 包含ctx和pred
     #             time_id = time_id.to(torch.float)
-    #             time_id[..., :, :, idx_scale_i] = time_id[..., :, :, idx_scale_i] * (factor ** (i-target_scale))
-    #             # time_id[..., :, :, idx_scale_i] = time_id[..., :, :, idx_scale_i] + (2 ** i-1) * torch.sigmoid(self.time_id_bias[i])
-    #
+    #             delta = i - target_scale
+    #             bias = factor ** (delta - 1) - 0.5 if delta > 0 else factor ** (delta - 1)
+    #             time_id[..., :, :, idx_scale_i] = time_id[..., :, :, idx_scale_i] * (factor ** delta) + bias
     #     return time_id
 
 

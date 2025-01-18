@@ -144,6 +144,8 @@ class MoiraiFinetune(L.LightningModule):
         self.token_idx_per_scale = self._get_token_idx_per_scale()
         self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
 
+        self.scale_weights = nn.Parameter(torch.ones(1 + num_new_scales))
+
         # Lora config
         self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
 
@@ -170,12 +172,12 @@ class MoiraiFinetune(L.LightningModule):
             if isinstance(module, MultiScaleRotaryProjection):
                 module.post_init(self.token_idx_per_scale)
 
-        self.scale_weight_fc = nn.Linear(
-            in_features=self.module.d_model * (self.num_new_scales+1),
-            out_features=self.num_new_scales+1
-        )
-        nn.init.zeros_(self.scale_weight_fc.weight)  # 初始化权重为0
-        nn.init.zeros_(self.scale_weight_fc.bias)  # 初始化偏置为0
+        # self.scale_weight_fc = nn.Linear(
+        #     in_features=self.module.d_model * (self.num_new_scales+1),
+        #     out_features=self.num_new_scales+1
+        # )
+        # nn.init.zeros_(self.scale_weight_fc.weight)  # 初始化权重为0
+        # nn.init.zeros_(self.scale_weight_fc.bias)  # 初始化偏置为0
 
         if self.lora_config is not None:
             self.module = LoraModel(self.module, self.lora_config, "default")
@@ -280,30 +282,87 @@ class MoiraiFinetune(L.LightningModule):
                 ]
             },
         )
-
-        # Compute each sample's scale_weight
-        sw_fc_input = []
-        for i in range(1 + self.num_new_scales):
-            pred_token_idx = self.pred_token_idx_per_scale[i]
-            masked_reprs = reprs[..., pred_token_idx, :].detach()
-            sw_fc_input.append(masked_reprs.mean(dim=1))
-        sw_fc_input = torch.concat(sw_fc_input, dim=-1)
-        scale_weight = torch.softmax(
-            self.scale_weight_fc(sw_fc_input) / self.temperature,
-            dim=1
-        )
-
-        # Compute weighted loss
-        loss = 0
-        for i in range(1+self.num_new_scales):
-            token_idx = self.token_idx_per_scale[i]
-            loss_i = loss_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
-            loss += loss_i * (2 ** i) * scale_weight[:, i]  # weight loss per sample by ds_factor & scale_weight
-        loss = loss.sum()
-
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
+
+        loss = 0
+        scale_weight = torch.softmax(self.scale_weights, dim=0)
+        for i in range(1 + self.num_new_scales):
+            token_idx = self.token_idx_per_scale[i]
+            loss_i = loss_mix[..., token_idx, :].sum()
+            loss += loss_i * scale_weight[i]
+
+            self.log(
+                f"train_{i}/{self.hparams.loss_func.__class__.__name__}",
+                loss_i,
+                on_step=self.hparams.log_on_step,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+                rank_zero_only=True,
+            )
+
+            self.log(
+                f"train_scale_weight/{i}",
+                scale_weight[i],
+                on_step=self.hparams.log_on_step,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+                rank_zero_only=True,
+            )
+
+
+        # # Compute each sample's scale_weight
+        # sw_fc_input = []
+        # for i in range(1 + self.num_new_scales):
+        #     pred_token_idx = self.pred_token_idx_per_scale[i]
+        #     masked_reprs = reprs[..., pred_token_idx, :].detach()
+        #     sw_fc_input.append(masked_reprs.mean(dim=1))
+        # sw_fc_input = torch.concat(sw_fc_input, dim=-1)
+        # scale_weight = torch.softmax(
+        #     self.scale_weight_fc(sw_fc_input) / self.temperature,
+        #     dim=1
+        # )
+
+        # # Compute weighted loss
+        # loss = 0
+        # for i in range(1+self.num_new_scales):
+        #     token_idx = self.token_idx_per_scale[i]
+        #     loss_i = loss_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
+        #     loss += loss_i * (2 ** i) * scale_weight[:, i]  # weight loss per sample by ds_factor & scale_weight
+        #
+        #     self.log(
+        #         f"train_{i}/{self.hparams.loss_func.__class__.__name__}",
+        #         loss_i.sum(),
+        #         on_step=self.hparams.log_on_step,
+        #         on_epoch=True,
+        #         prog_bar=True,
+        #         logger=True,
+        #         sync_dist=True,
+        #         batch_size=batch_size,
+        #         rank_zero_only=True,
+        #     )
+        #
+        #     self.log(
+        #         f"train_scale_weight/{i}",
+        #         scale_weight[:, i].mean(),
+        #         on_step=self.hparams.log_on_step,
+        #         on_epoch=True,
+        #         prog_bar=True,
+        #         logger=True,
+        #         sync_dist=True,
+        #         batch_size=batch_size,
+        #         rank_zero_only=True,
+        #     )
+        #
+        # loss = loss.sum()
+
         self.log(
             f"train/{self.hparams.loss_func.__class__.__name__}",
             loss,
@@ -337,30 +396,74 @@ class MoiraiFinetune(L.LightningModule):
                 ]
             },
         )
-
-        # Compute each sample's scale_weight
-        sw_fc_input = []
-        for i in range(1+self.num_new_scales):
-            pred_token_idx = self.pred_token_idx_per_scale[i]
-            masked_reprs = reprs[..., pred_token_idx, :].detach()
-            sw_fc_input.append(masked_reprs.mean(dim=1))
-        sw_fc_input = torch.concat(sw_fc_input, dim=-1)
-        scale_weight = torch.softmax(
-            self.scale_weight_fc(sw_fc_input) / self.temperature,
-            dim=1
-        )
-
-        # Compute weighted loss
-        val_loss = 0
-        for i in range(1 + self.num_new_scales):
-            token_idx = self.token_idx_per_scale[i]
-            loss_i = loss_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
-            val_loss += loss_i * (2 ** i) * scale_weight[:, i]  # weight loss per sample by ds_factor & scale_weight
-        val_loss = val_loss.sum()
-
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
+
+        val_loss = 0
+        scale_weight = torch.softmax(self.scale_weights, dim=0)
+        for i in range(1 + self.num_new_scales):
+            token_idx = self.token_idx_per_scale[i]
+            loss_i = loss_mix[..., token_idx, :].sum()
+            val_loss += loss_i * scale_weight[i]
+
+            self.log(
+                f"val_{i}/{self.hparams.loss_func.__class__.__name__}",
+                loss_i,
+                on_step=self.hparams.log_on_step,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+                rank_zero_only=True,
+            )
+
+        # # Compute each sample's scale_weight
+        # sw_fc_input = []
+        # for i in range(1+self.num_new_scales):
+        #     pred_token_idx = self.pred_token_idx_per_scale[i]
+        #     masked_reprs = reprs[..., pred_token_idx, :].detach()
+        #     sw_fc_input.append(masked_reprs.mean(dim=1))
+        # sw_fc_input = torch.concat(sw_fc_input, dim=-1)
+        # scale_weight = torch.softmax(
+        #     self.scale_weight_fc(sw_fc_input) / self.temperature,
+        #     dim=1
+        # )
+        #
+        # # Compute weighted loss
+        # val_loss = 0
+        # for i in range(1 + self.num_new_scales):
+        #     token_idx = self.token_idx_per_scale[i]
+        #     loss_i = loss_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
+        #     val_loss += loss_i * (2 ** i) * scale_weight[:, i]  # weight loss per sample by ds_factor & scale_weight
+        #
+        #     self.log(
+        #         f"val_{i}/{self.hparams.loss_func.__class__.__name__}",
+        #         loss_i.sum(),
+        #         on_step=self.hparams.log_on_step,
+        #         on_epoch=True,
+        #         prog_bar=True,
+        #         logger=True,
+        #         sync_dist=True,
+        #         batch_size=batch_size,
+        #         rank_zero_only=True,
+        #     )
+        #
+        #     self.log(
+        #         f"val_scale_weight/{i}",
+        #         scale_weight[:, i].mean(),
+        #         on_step=self.hparams.log_on_step,
+        #         on_epoch=True,
+        #         prog_bar=True,
+        #         logger=True,
+        #         sync_dist=True,
+        #         batch_size=batch_size,
+        #         rank_zero_only=True,
+        #     )
+        #
+        # val_loss = val_loss.sum()
+
         self.log(
             f"val/{self.hparams.loss_func.__class__.__name__}",
             val_loss,
@@ -372,6 +475,46 @@ class MoiraiFinetune(L.LightningModule):
             batch_size=batch_size,
             rank_zero_only=True,
         )
+
+        # if self.hparams.val_metric is not None:
+        #     val_metrics = (
+        #         self.hparams.val_metric
+        #         if isinstance(self.hparams.val_metric, list)
+        #         else [self.hparams.val_metric]
+        #     )
+        #     for metric_func in val_metrics:
+        #         if isinstance(metric_func, PackedPointLoss):
+        #             pred = distr.sample(torch.Size((self.hparams.num_samples,)))
+        #             pred = torch.median(pred, dim=0).values
+        #         elif isinstance(metric_func, PackedDistributionLoss):
+        #             pred = distr
+        #         else:
+        #             raise ValueError(f"Unsupported loss function: {metric_func}")
+        #         metric = metric_func(
+        #             pred=pred,
+        #             **{
+        #                 field: batch[field]
+        #                 for field in [
+        #                     "target",
+        #                     "prediction_mask",
+        #                     "observed_mask",
+        #                     "sample_id",
+        #                     "variate_id",
+        #                 ]
+        #             },
+        #         )
+        #         self.log(
+        #             f"val/{metric_func.__class__.__name__}",
+        #             metric,
+        #             on_step=self.hparams.log_on_step,
+        #             on_epoch=True,
+        #             prog_bar=True,
+        #             logger=True,
+        #             sync_dist=True,
+        #             batch_size=batch_size,
+        #             rank_zero_only=True,
+        #         )
+        # return val_loss
 
         if self.hparams.val_metric is not None:
             val_metrics = (
@@ -403,28 +546,43 @@ class MoiraiFinetune(L.LightningModule):
                     },
                 )
 
-                # ToDo: 这些metrics没有进行scale加权，但不影响训练
-                # metric = metric.sum()
-
-                # Compute each sample's scale_weight
-                sw_fc_input = []
-                for i in range(1 + self.num_new_scales):
-                    pred_token_idx = self.pred_token_idx_per_scale[i]
-                    masked_reprs = reprs[..., pred_token_idx, :].detach()
-                    sw_fc_input.append(masked_reprs.mean(dim=1))
-                sw_fc_input = torch.concat(sw_fc_input, dim=-1)
-                scale_weight = torch.softmax(
-                    self.scale_weight_fc(sw_fc_input) / self.temperature,
-                    dim=1
-                )
-
                 # Compute weighted metric
                 metric = 0
                 for i in range(1 + self.num_new_scales):
                     token_idx = self.token_idx_per_scale[i]
-                    metric_i = metric_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
-                    metric += metric_i * (2 ** i) * scale_weight[:, i]
-                metric = metric.sum()
+                    metric_i = metric_mix[..., token_idx, :].sum()  # (bs, )
+                    metric += metric_i * scale_weight[i]
+
+                    self.log(
+                        f"val_{i}/{metric_func.__class__.__name__}",
+                        metric_i,
+                        on_step=self.hparams.log_on_step,
+                        on_epoch=True,
+                        prog_bar=True,
+                        logger=True,
+                        sync_dist=True,
+                        batch_size=batch_size,
+                        rank_zero_only=True,
+                    )
+
+                # for i in range(1 + self.num_new_scales):
+                #     token_idx = self.token_idx_per_scale[i]
+                #     metric_i = metric_mix[..., token_idx, :].sum(dim=(-1, -2))  # (bs, )
+                #     metric += metric_i * (2 ** i) * scale_weight[:, i]
+                #
+                #     self.log(
+                #         f"val_{i}/{metric_func.__class__.__name__}",
+                #         metric_i.sum(),
+                #         on_step=self.hparams.log_on_step,
+                #         on_epoch=True,
+                #         prog_bar=True,
+                #         logger=True,
+                #         sync_dist=True,
+                #         batch_size=batch_size,
+                #         rank_zero_only=True,
+                #     )
+                #
+                # metric = metric.sum()
 
                 self.log(
                     f"val/{metric_func.__class__.__name__}",
@@ -490,8 +648,8 @@ class MoiraiFinetune(L.LightningModule):
                     decay.add(fpn)
                 elif 'v_A' in pn or 'v_B' in pn:
                     decay.add(fpn)
-                # elif 'scale_weight' in pn:
-                #     decay.add(fpn)
+                elif 'scale_weight' in pn:
+                    decay.add(fpn)
 
                 # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj
                 #     decay.add(fpn)

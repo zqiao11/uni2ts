@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=weighted_loss_mfc_1e-5
+exp_name=weighted_loss_mfc_tid
 data=ettm1
 cl=4000
 ps=128
@@ -34,5 +34,5 @@ for pl in 96 192 336 720; do
   val_data.mode=${mode} \
   model.lr=1e-5 \
   model.scale_weight_lr=1e-5 \
-  model.temperature=1
+  model.temperature=0.1
 done

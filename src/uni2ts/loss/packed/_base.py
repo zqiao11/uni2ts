@@ -108,9 +108,9 @@ class PackedLoss(abc.ABC):
         nobs = torch.where(nobs == 0, nobs, 1 / nobs).sum()
         loss = safe_div(loss, tobs * nobs)
         if self.return_loss_batchwise:
-            return loss * mask   # (loss * mask).sum(dim=(-1, -2))
+            return loss * mask
         else:
-            return (loss * mask).sum()
+            return (loss * mask).sum()  # (loss * mask).sum(dim=(-1, -2))
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}()"

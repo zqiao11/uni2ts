@@ -134,25 +134,9 @@ class MultiScaleRotaryProjection(Projection):
             ),
             persistent=False,
         )
-        self.register_buffer("cos", None, persistent=False)
-        self.register_buffer("sin", None, persistent=False)
-        self._init_freq(max_len=max_len)
-
-        self.max_len = max_len
 
     def post_init(self, token_idx_per_scale):
         self.token_idx_per_scale = token_idx_per_scale
-        self.num_scales = len(token_idx_per_scale)
-
-    def _init_freq(self, max_len: int):
-        if self.cos is None or self.cos.size(-2) < max_len:
-            position = torch.arange(
-                max_len, device=self.theta.device, dtype=self.theta.dtype
-            )
-            m_theta = einsum(position, self.theta, "length, width -> length width")
-            m_theta = repeat(m_theta, "length width -> length (width 2)")
-            self.register_buffer("cos", torch.cos(m_theta), persistent=False)  # (512, 32)
-            self.register_buffer("sin", torch.sin(m_theta), persistent=False)
 
     @staticmethod
     def _rotate(x: Float[torch.Tensor, "... dim"]) -> Float[torch.Tensor, "... dim"]:

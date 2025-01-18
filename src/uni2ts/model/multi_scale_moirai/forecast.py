@@ -140,6 +140,7 @@ class MoiraiForecast(L.LightningModule):
             self.lora_config = LoraConfig(**lora_kwargs)
             self.module = LoraModel(self.module, self.lora_config, "default")
 
+        self.scale_weights = nn.Parameter(torch.ones(1 + num_new_scales))
         self.post_init()
 
 
@@ -167,10 +168,10 @@ class MoiraiForecast(L.LightningModule):
             if isinstance(module, MultiScaleRotaryProjection):
                 module.post_init(self.token_idx_per_scale)
 
-        self.scale_weight_fc = nn.Linear(
-            in_features=self.module.d_model * (self.num_new_scales+1),
-            out_features=self.num_new_scales+1
-        )
+        # self.scale_weight_fc = nn.Linear(
+        #     in_features=self.module.d_model * (self.num_new_scales+1),
+        #     out_features=self.num_new_scales+1
+        # )
 
         self.print_weight = True
 
@@ -1000,23 +1001,24 @@ class MoiraiForecast(L.LightningModule):
                 preds_all_scales.append(preds_i)
 
         preds = None
+        weight = torch.softmax(self.scale_weights, dim=0)
 
-        sw_fc_input = []
-        for i in range(1+self.num_new_scales):
-            pred_token_idx = self.pred_token_idx_per_scale[i]
-            masked_reprs = reprs[..., pred_token_idx, :].detach()
-            sw_fc_input.append(masked_reprs.mean(dim=1))
-        sw_fc_input = torch.concat(sw_fc_input, dim=-1)
-        weight = torch.softmax(
-            self.scale_weight_fc(sw_fc_input) / self.temperature,
-            dim=1
-        )
+        # sw_fc_input = []
+        # for i in range(1+self.num_new_scales):
+        #     pred_token_idx = self.pred_token_idx_per_scale[i]
+        #     masked_reprs = reprs[..., pred_token_idx, :].detach()
+        #     sw_fc_input.append(masked_reprs.mean(dim=1))
+        # sw_fc_input = torch.concat(sw_fc_input, dim=-1)
+        # weight = torch.softmax(
+        #     self.scale_weight_fc(sw_fc_input) / self.temperature,
+        #     dim=1
+        # )
 
         if self.print_weight is True:
             print("scale_weights: {}".format(weight))
             self.print_weight = False
 
-        weight = repeat(weight, "bs k -> bs sample pred k", sample=sample, pred=self.hparams.prediction_length)
+        # weight = repeat(weight, "bs k -> bs sample pred k", sample=sample, pred=self.hparams.prediction_length)
 
         for i in range(self.num_new_scales+1):
             preds_i = preds_all_scales[i]
@@ -1024,9 +1026,14 @@ class MoiraiForecast(L.LightningModule):
             scale_factor = self.hparams.prediction_length // seq_len
 
             if preds is None:
-                preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
+                preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
             else:
-                preds += preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
+                preds += preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
+
+            # if preds is None:
+            #     preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
+            # else:
+            #     preds += preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
 
         return preds.squeeze(-1)
 

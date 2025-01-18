@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=weighted_loss_mfc_1e-5
+exp_name=weighted_loss_mfc_tid_t1
 data=weather
 cl=2000
 ps=128
@@ -12,7 +12,7 @@ mode=S  # M
 ft_pattern=freeze_ffn
 
 
-for pl in 96 192 336 720; do
+for pl in 96; do   # 192 336 720
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \
@@ -36,5 +36,5 @@ for pl in 96 192 336 720; do
   trainer.callbacks."2".monitor=val/PackedMSELoss \
   model.lr=1e-5 \
   model.scale_weight_lr=1e-5 \
-  model.temperature=10
+  model.temperature=1
 done
