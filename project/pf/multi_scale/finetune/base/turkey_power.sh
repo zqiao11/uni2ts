@@ -31,4 +31,6 @@ val_data.context_length=$cl \
 val_data.prediction_length=$pl \
 trainer.callbacks.'2'.patience=30 \
 trainer.callbacks.1.save_last=true \
-model.lr=5e-6
+train_dataloader.batch_size=256 \
+model.lr=1e-5 \
+model.scale_weight_lr=1e-2

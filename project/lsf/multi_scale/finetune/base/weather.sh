@@ -34,5 +34,8 @@ for pl in 96 192 336 720; do
   val_data.mode=${mode} \
   trainer.callbacks."1".monitor=val/PackedMSELoss \
   trainer.callbacks."2".monitor=val/PackedMSELoss \
-  model.lr=5e-6
+  model.lr=1e-7 \
+  model.scale_weight_lr=1e-5 \
+  train_dataloader.batch_size=128 \
+  trainer.callbacks.'2'.patience=1
 done

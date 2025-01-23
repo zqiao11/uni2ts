@@ -1,17 +1,17 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 mode=S
 cp=conf/lsf/multi_scale/eval
 cl=5000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.1_R_small/lsf/full/ettm1/S/cl4000_pl96/checkpoints/epoch_2-step_1251.ckpt'
-cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.1_R_small/lsf/full/ettm1/S/cl4000_pl192/checkpoints/epoch_0-step_416.ckpt'
-cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.1_R_small/lsf/full/ettm1/S/cl4000_pl336/checkpoints/epoch_0-step_414.ckpt'
-cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.1_R_small/lsf/full/ettm1/S/cl4000_pl720/checkpoints/epoch_0-step_408.ckpt'
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/default/freeze_ffn/ettm1/S/cl5000_pl96/checkpoints/epoch_4-step_8060.ckpt'
+cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/default/freeze_ffn/ettm1/S/cl5000_pl192/checkpoints/epoch_2-step_4821.ckpt'
+cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/default/freeze_ffn/ettm1/S/cl5000_pl336/checkpoints/epoch_1-step_3198.ckpt'
+cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/default/freeze_ffn/ettm1/S/cl5000_pl720/checkpoints/epoch_0-step_1578.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

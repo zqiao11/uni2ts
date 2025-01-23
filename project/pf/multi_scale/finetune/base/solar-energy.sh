@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_base
 cp=conf/pf/multi_scale/finetune
-exp_name=lr5e-6
+exp_name=lr1e-5
 cl=4000
 pl=24
 ft_pattern=freeze_ffn
@@ -29,4 +29,5 @@ val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
-model.lr=5e-6
+model.lr=5e-5 \
+model.scale_weight_lr=1e-2

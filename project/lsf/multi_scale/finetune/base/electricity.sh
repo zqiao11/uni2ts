@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_base
 cp=conf/lsf/multi_scale/finetune
-exp_name=lr5e-6
+exp_name=default
 data=electricity
 cl=5000
 ps=32
@@ -32,5 +32,9 @@ for pl in 96 192 336 720; do
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
-  model.lr=5e-6
+  model.lr=1e-4 \
+  model.scale_weight_lr=1e-2 \
+  trainer.max_epochs=30 \
+  train_dataloader.batch_size=256 \
+  trainer.callbacks.'2'.patience=1
 done

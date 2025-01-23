@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_base
 cp=conf/lsf/multi_scale/finetune
-exp_name=default
+exp_name=Base_Etth1_w010_lr1e-7_wlr1e-5
 data=etth1
 cl=5000
 ps=64
@@ -31,5 +31,9 @@ for pl in 96 192 336 720; do
   val_data.patch_size=${ps} \
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
-  val_data.mode=${mode}
+  val_data.mode=${mode} \
+  model.lr=1e-7 \
+  model.scale_weight_lr=1e-5 \
+  train_dataloader.batch_size=128 \
+  model.prior_scale0=True
 done
