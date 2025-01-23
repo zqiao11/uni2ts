@@ -1,17 +1,17 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=2
+export CUDA_VISIBLE_DEVICES=1
 
 mode=S
 cp=conf/lsf/multi_scale/eval
 cl=3000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid_t01/freeze_ffn/ettm2/S/cl3000_pl96/checkpoints/epoch_0-step_431.ckpt'
-cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid_t01/freeze_ffn/ettm2/S/cl3000_pl192/checkpoints/epoch_0-step_429.ckpt'
-cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid_t01/freeze_ffn/ettm2/S/cl3000_pl336/checkpoints/epoch_0-step_427.ckpt'
-cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid_t01/freeze_ffn/ettm2/S/cl3000_pl720/checkpoints/epoch_0-step_422.ckpt'
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm2/S/cl3000_pl96/checkpoints/epoch_6-step_3017.ckpt'
+cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm2/S/cl3000_pl192/checkpoints/epoch_0-step_429.ckpt'
+cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm2/S/cl3000_pl336/checkpoints/epoch_0-step_427.ckpt'
+cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm2/S/cl3000_pl720/checkpoints/epoch_1-step_844.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

@@ -125,7 +125,8 @@ class MoiraiFinetune(L.LightningModule):
         temperature: int = 1,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
-        scale_weight_lr: float = 1e-3
+        scale_weight_lr: float = 1e-3,
+        prior_scale: Optional[int] = None,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
@@ -142,12 +143,9 @@ class MoiraiFinetune(L.LightningModule):
         self.temperature = temperature
 
         self.token_idx_per_scale = self._get_token_idx_per_scale()
-        self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
-
         self.scale_weights = nn.Parameter(torch.ones(1 + num_new_scales))
-
-        # Lora config
-        self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
+        if prior_scale is not None:
+            self.scale_weights.data[prior_scale] = 10  # Only for ETTh1 & ETTh2
 
     def post_init(self):
         """
@@ -179,19 +177,6 @@ class MoiraiFinetune(L.LightningModule):
         # nn.init.zeros_(self.scale_weight_fc.weight)  # 初始化权重为0
         # nn.init.zeros_(self.scale_weight_fc.bias)  # 初始化偏置为0
 
-        if self.lora_config is not None:
-            self.module = LoraModel(self.module, self.lora_config, "default")
-            # Params not used in Lora are set as requires_grad=False automatically.
-            # Activate some of those params manually. FFN and out_proj are kept as frozen.
-            for pn, p in self.named_parameters():
-                if "param_proj" in pn or "in_proj" in pn:
-                    p.requires_grad = True
-                if "norm" in pn:
-                    p.requires_grad = True
-                if "mask_encoding" in pn or "var_attn_bias" in pn:
-                    p.requires_grad = True
-                # ToDo: Note to include new learnable params introduced in MS
-
     def _get_token_idx_per_scale(self):
         base_token_len = math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
         ctx_len = self.context_length
@@ -220,7 +205,9 @@ class MoiraiFinetune(L.LightningModule):
         all_scale_pred_token_len = []
         pred_len = self.prediction_length
 
-        for i in range(self.num_new_scales+1):
+        all_scale_pred_token_len.append(math.ceil(pred_len / self.patch_size))
+
+        for i in range(self.num_new_scales):
             pred_len = math.ceil(pred_len / self.ds_factor)
             pred_token_len = math.ceil(pred_len / self.patch_size)
             all_scale_pred_token_len.append(pred_token_len)

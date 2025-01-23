@@ -58,16 +58,18 @@ def main(cfg: DictConfig):
 
             new_state_dict = {}
             for name, tensor in pretrained_moirai_state_dict.items():
-                # If using Lora, need to rename the pretrained weights before loading.
-                if hyper_params['use_lora']:
-                    new_name = 'module.model.' + name
-                    # In LoraModel, Lora's target_modules will be added a suffix '.base_layer'.
-                    for module in lora_target_modules:
-                        if module in new_name:
-                            new_name = new_name.replace(module, module + '.base_layer')
-                            break
-                else:
-                    new_name = "module." + name
+                new_name = "module." + name
+
+                # # If using Lora, need to rename the pretrained weights before loading.
+                # if hyper_params['use_lora']:
+                #     new_name = 'module.model.' + name
+                #     # In LoraModel, Lora's target_modules will be added a suffix '.base_layer'.
+                #     for module in lora_target_modules:
+                #         if module in new_name:
+                #             new_name = new_name.replace(module, module + '.base_layer')
+                #             break
+                # else:
+                #     new_name = "module." + name
                 new_state_dict[new_name] = tensor
             pretrained_moirai_state_dict = new_state_dict
 

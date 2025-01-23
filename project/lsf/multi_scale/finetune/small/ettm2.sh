@@ -12,7 +12,7 @@ mode=S
 ft_pattern=freeze_ffn
 
 
-for pl in 336 720; do  # 96 192
+for pl in 96 192 336 720; do
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \
@@ -34,8 +34,4 @@ for pl in 336 720; do  # 96 192
   val_data.mode=${mode} \
   model.lr=5e-6 \
   model.scale_weight_lr=1e-2
-
-#  model.lr=1e-5 \
-#  model.scale_weight_lr=1e-5 \
-#  model.temperature=0.1
 done

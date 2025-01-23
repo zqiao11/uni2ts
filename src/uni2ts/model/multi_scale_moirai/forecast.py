@@ -133,17 +133,10 @@ class MoiraiForecast(L.LightningModule):
         self.strict_loading = False
 
         self.token_idx_per_scale = self._get_token_idx_per_scale()
-        self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
-
-        # Set Lora for Moirai
-        if use_lora:
-            self.lora_config = LoraConfig(**lora_kwargs)
-            self.module = LoraModel(self.module, self.lora_config, "default")
+        # self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
 
         self.scale_weights = nn.Parameter(torch.ones(1 + num_new_scales))
         self.post_init()
-
-
 
     def post_init(self):
         """
@@ -205,7 +198,9 @@ class MoiraiForecast(L.LightningModule):
         all_scale_pred_token_len = []
         pred_len = self.hparams.prediction_length
 
-        for i in range(self.num_new_scales+1):
+        all_scale_pred_token_len.append(math.ceil(pred_len / self.hparams.patch_size))
+
+        for i in range(self.num_new_scales):
             pred_len = math.ceil(pred_len / self.ds_factor)
             pred_token_len = math.ceil(pred_len / self.hparams.patch_size)
             all_scale_pred_token_len.append(pred_token_len)
@@ -1022,13 +1017,12 @@ class MoiraiForecast(L.LightningModule):
 
         for i in range(self.num_new_scales+1):
             preds_i = preds_all_scales[i]
-            bs, num_samples, seq_len, channels = preds_i.shape
-            scale_factor = self.hparams.prediction_length // seq_len
+            scale_factor = self.ds_factor ** i
 
             if preds is None:
                 preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
             else:
-                preds += preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
+                preds += preds_i.repeat_interleave(scale_factor, dim=2)[:, :, :self.hparams.prediction_length, :] * weight[i].unsqueeze(-1)
 
             # if preds is None:
             #     preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)

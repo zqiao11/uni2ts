@@ -1,18 +1,18 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=weighted_loss_mfc_tid_lr5e-6_t0.1
+exp_name=Etth1_cl5000_w010_lr5e-7_wlr1e-7
 data=etth1
-cl=500
-ps=32
+cl=5000
+ps=64
 mode=S
 ft_pattern=freeze_ffn
 
 
-for pl in 96; do  #  192 336 720
+for pl in 96 192 336 720; do
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \
@@ -32,7 +32,7 @@ for pl in 96; do  #  192 336 720
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
-  model.lr=5e-6 \
+  model.lr=5e-7 \
   model.scale_weight_lr=1e-5 \
-  model.temperature=0.1
+  model.prior_scale=0
 done

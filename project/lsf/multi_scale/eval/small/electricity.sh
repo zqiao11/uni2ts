@@ -9,10 +9,12 @@ cl=5000
 model=moirai_lightning_ckpt
 
 
-cpp1='.-mm/outputs_old/lsf/moirai_1.0_R_small/lsf/electricity/cl3000_pl96/checkpoints/epoch_998-step_199800.ckpt'
-cpp2='.-mm/outputs/lsf/moirai_1.0_R_small/lsf/electricity/cl3000_pl192/checkpoints/epoch_748-step_149800.ckpt'
-cpp3='.-mm/outputs/lsf/moirai_1.0_R_small/lsf/electricity/cl3000_pl336/checkpoints/epoch_600-step_120200.ckpt'
-cpp4='.-mm/outputs/lsf/moirai_1.0_R_small/lsf/electricity/cl3000_pl720/checkpoints/epoch_385-step_77200.ckpt'
+cpp1=''
+cpp2=''
+cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/electricity/S/cl5000_pl336/checkpoints/epoch_2-step_49194.ckpt'
+cpp4=''
+
+
 index=1
 for pl in 96 192 336 720; do
   case $index in

@@ -8,10 +8,10 @@ cp=conf/lsf/multi_scale/eval
 cl=4000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid/freeze_ffn/ettm1/S/cl4000_pl96/checkpoints/epoch_1-step_834.ckpt'
-cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid/freeze_ffn/ettm1/S/cl4000_pl192/checkpoints/epoch_0-step_416.ckpt'
-cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid/freeze_ffn/ettm1/S/cl4000_pl336/checkpoints/epoch_0-step_414.ckpt'
-cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/weighted_loss_mfc_tid/freeze_ffn/ettm1/S/cl4000_pl720/checkpoints/epoch_0-step_408.ckpt'
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm1/S/cl4000_pl96/checkpoints/epoch_2-step_1251.ckpt'
+cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm1/S/cl4000_pl192/checkpoints/epoch_1-step_832.ckpt'
+cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm1/S/cl4000_pl336/checkpoints/epoch_1-step_828.ckpt'
+cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-2_valScaled_DFscaled/freeze_ffn/ettm1/S/cl4000_pl720/checkpoints/epoch_1-step_816.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

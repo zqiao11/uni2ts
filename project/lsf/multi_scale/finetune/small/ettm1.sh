@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=weighted_loss_mfc_tid
+exp_name=data_weight_lr1e-2_valScaled
 data=ettm1
 cl=4000
 ps=128
@@ -32,7 +32,6 @@ for pl in 96 192 336 720; do
   val_data.context_length=$cl \
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
-  model.lr=1e-5 \
-  model.scale_weight_lr=1e-5 \
-  model.temperature=0.1
+  model.lr=5e-6 \
+  model.scale_weight_lr=1e-2
 done
