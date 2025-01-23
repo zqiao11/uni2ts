@@ -30,5 +30,5 @@ val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
 train_dataloader.batch_size=256 \
-model.lr=1e-5 \
+model.lr=5e-5 \
 trainer.callbacks.'2'.patience=1

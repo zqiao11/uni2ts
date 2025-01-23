@@ -53,4 +53,4 @@ lora_kwargs:
   lora_dropout: 0.05
 
 scale_weight_lr: 1e-2
-prior_scale: None
+prior_scale: null
