@@ -449,16 +449,30 @@ def generate_finetune_builder(
     """
     Set distance=1 for training data. Same as standard LSF setting.
     """
-    return SimpleFinetuneDatasetBuilder(
-        dataset=dataset,
-        windows=train_length - context_length - prediction_length + 1,
-        distance=1,
-        prediction_length=prediction_length,
-        context_length=context_length,
-        patch_size=patch_size,
-        mode=mode,
-        storage_path=storage_path,
-    )
+    if dataset == 'electricity':
+        distance = 25
+        return SimpleFinetuneDatasetBuilder(
+            dataset=dataset,
+            windows=(train_length - context_length - prediction_length) // distance + 1,
+            distance=distance,
+            prediction_length=prediction_length,
+            context_length=context_length,
+            patch_size=patch_size,
+            mode=mode,
+            storage_path=storage_path,
+        )
+
+    else:
+        return SimpleFinetuneDatasetBuilder(
+            dataset=dataset,
+            windows=train_length - context_length - prediction_length + 1,
+            distance=1,
+            prediction_length=prediction_length,
+            context_length=context_length,
+            patch_size=patch_size,
+            mode=mode,
+            storage_path=storage_path,
+        )
 
 
 def generate_eval_builder(
@@ -485,8 +499,8 @@ def generate_eval_builder(
     # }
 
     distances = {
-        "ETTh1_eval": 13,  # 13h
-        "ETTh2_eval": 13,
+        "ETTh1_eval": 1,  # 13h
+        "ETTh2_eval": 1,
         "ETTm1_eval": 25,  # 6h 15min
         "ETTm2_eval": 25,
         "weather_eval": 37,  # 6h 10 min

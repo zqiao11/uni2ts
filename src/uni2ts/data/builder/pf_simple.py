@@ -394,15 +394,27 @@ def generate_finetune_builder(
     storage_path: Path = env.CUSTOM_DATA_PATH,
 ) -> SimpleFinetuneDatasetBuilder:
 
-    return SimpleFinetuneDatasetBuilder(
-        dataset=dataset,
-        windows=train_length - context_length - prediction_length + 1,
-        distance=1,
-        prediction_length=prediction_length,
-        context_length=context_length,
-        patch_size=patch_size,
-        storage_path=storage_path,
-    )
+    if dataset == 'electricity':
+        distance = 20
+        return SimpleFinetuneDatasetBuilder(
+            dataset=dataset,
+            windows=(train_length - context_length - prediction_length) // distance + 1,
+            distance=distance,
+            prediction_length=prediction_length,
+            context_length=context_length,
+            patch_size=patch_size,
+            storage_path=storage_path,
+        )
+    else:
+        return SimpleFinetuneDatasetBuilder(
+            dataset=dataset,
+            windows=train_length - context_length - prediction_length + 1,
+            distance=1,
+            prediction_length=prediction_length,
+            context_length=context_length,
+            patch_size=patch_size,
+            storage_path=storage_path,
+        )
 
 
 def generate_eval_builder(
