@@ -1,0 +1,52 @@
+hydra:
+  run:
+    dir: outputs/online/${hydra:runtime.choices.model}/${exp_name}/${model.finetune_pattern}/${hydra:runtime.choices.data}/${data.mode}/${run_name}
+defaults:
+  - model: ???
+  - data: ???
+  - val_data: null
+  - _self_
+exp_name: ???
+run_name: ???
+seed: 0
+tf32: true
+compile: false
+ckpt_path: null
+save_checkpoint: true  # 默认保存
+trainer:
+  _target_: lightning.Trainer
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32
+  logger:
+      _target_: lightning.pytorch.loggers.TensorBoardLogger
+      save_dir: ${hydra:runtime.output_dir}
+      name: logs
+  callbacks:
+#    - _target_: lightning.pytorch.callbacks.ModelCheckpoint
+#      dirpath: ${hydra:runtime.output_dir}/checkpoints
+#      save_weights_only: true
+#      every_n_epochs: 1
+    - _target_: lightning.pytorch.callbacks.TQDMProgressBar
+      refresh_rate: 100
+  max_epochs: 1
+  enable_progress_bar: true
+  accumulate_grad_batches: 1
+  gradient_clip_val: 1.0
+  gradient_clip_algorithm: norm
+train_dataloader:
+  _target_: uni2ts.data.loader.DataLoader
+  batch_size: 1
+  batch_size_factor: 2.0
+  cycle: false
+  num_batches_per_epoch: null
+  shuffle: false
+  num_workers: 11
+  pin_memory: true
+  drop_last: false
+  fill_last: false
+  worker_init_fn: null
+  prefetch_factor: 2
+  persistent_workers: true
