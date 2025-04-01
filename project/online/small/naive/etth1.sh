@@ -16,9 +16,9 @@ zero_shot=False
 
 # 定义参数组合
 declare -a experiments=(
-    "pl=24 ps=64 lr=1e-5"
-    "pl=48 ps=64 lr=1e-5"
-    "pl=96 ps=64 lr=1e-5"
+    "pl=24 ps=64 lr=1e-5 warmup_checkpoint=/home/zhongzheng/uni2ts/outputs/warmup/moirai_1.0_R_small/default/full/etth1/S/cl512_pl24/checkpoints/epoch_17-step_1170.ckpt"
+#    "pl=48 ps=64 lr=1e-5"
+#    "pl=96 ps=64 lr=1e-5"
 )
 
 # 统一 for loop 执行
@@ -41,5 +41,6 @@ for exp in "${experiments[@]}"; do
         model.lr="$lr" \
         train_dataloader.batch_size="$batch_size" \
         trainer.max_epochs="$max_epochs" \
-        model.zero_shot="$zero_shot"
+        model.zero_shot="$zero_shot" \
+        model.warmup_checkpoint="$warmup_checkpoint"
 done

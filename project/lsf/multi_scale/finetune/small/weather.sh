@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=data_weight_lr1e-5_valScaled
+exp_name=zip_timeID
 data=weather
 cl=2000
 ps=128
@@ -12,7 +12,7 @@ mode=S  # M
 ft_pattern=freeze_ffn
 
 
-for pl in 96 192 336 720; do
+for pl in 336 720 ; do  # 96 192 336 720
   python -m cli.train \
   -cp $cp \
   exp_name=$exp_name \

@@ -15,7 +15,7 @@ max_epochs=1
 
 for pl in 24 48 96; do
   for ps in 32 64; do
-    for lr in 1e-3 1e-4 1e-5; do
+    for lr in 1e-4 1e-5; do
       python -m cli.train \
       -cp $cp \
       exp_name=$exp_name \

@@ -1,17 +1,17 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=3
+export CUDA_VISIBLE_DEVICES=2
 
 mode=S
 cp=conf/lsf/multi_scale/eval
 cl=2000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-5_valScaled/freeze_ffn/weather/S/cl2000_pl96/checkpoints/epoch_9-step_14280.ckpt'
-cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-5_valScaled/freeze_ffn/weather/S/cl2000_pl192/checkpoints/epoch_7-step_11392.ckpt'
-cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-5_valScaled/freeze_ffn/weather/S/cl2000_pl336/checkpoints/epoch_5-step_8508.ckpt'
-cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/data_weight_lr1e-5_valScaled/freeze_ffn/weather/S/cl2000_pl720/checkpoints/epoch_4-step_7010.ckpt'
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/zip_timeID/freeze_ffn/weather/S/cl2000_pl96/checkpoints/epoch_11-step_17136.ckpt'
+cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/zip_timeID/freeze_ffn/weather/S/cl2000_pl192/checkpoints/epoch_7-step_11392.ckpt'
+#cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/ablate_attn_lora/full/weather/S/cl2000_pl336/checkpoints/epoch_1-step_2836.ckpt'
+#cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/ablate_attn_lora/full/weather/S/cl2000_pl720/checkpoints/epoch_1-step_2804.ckpt'
 
 
 index=1

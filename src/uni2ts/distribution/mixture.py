@@ -139,6 +139,24 @@ class Mixture(Distribution):
             ).squeeze(-1)
         return samples
 
+    def rsample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:
+        """
+        允许反向传播的采样（reparameterization trick）。
+        """
+        # 1. 计算 Gumbel-softmax 权重
+        gumbel_noise = -torch.log(-torch.log(torch.rand_like(self.weights.logits)))  # Gumbel(0,1)
+        soft_sample = torch.nn.functional.softmax((self.weights.logits + gumbel_noise) / 0.1, dim=-1)
+
+        # 2. 对每个组件进行 rsample()
+        component_samples = torch.stack(
+            [comp.rsample(sample_shape) for comp in self.components], dim=-1  # (batch, ..., num_components)
+        )
+
+        # 3. 用 soft weights 进行加权平均（混合采样）
+        samples = (soft_sample.unsqueeze(0) * component_samples).sum(dim=-1)
+
+        return samples
+
     @constraints.dependent_property
     def support(self) -> constraints.Constraint:
         return constraints.real

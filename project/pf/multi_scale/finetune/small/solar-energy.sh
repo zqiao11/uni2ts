@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_small
 cp=conf/pf/multi_scale/finetune
-exp_name=in_proj_attn_lora
+exp_name=solar_small_k1
 cl=2000
 pl=24
 ft_pattern=freeze_ffn
@@ -29,4 +29,5 @@ val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
-model.lr=5e-6
+model.lr=1e-5 \
+model.num_new_scales=1

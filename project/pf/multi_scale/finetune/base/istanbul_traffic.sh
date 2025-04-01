@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_base
 cp=conf/pf/multi_scale/finetune
-exp_name=default
+exp_name=Istanbul_lr5e-6_swlr1e-3_bs512
 cl=1000
 pl=24
 ft_pattern=freeze_ffn
@@ -29,5 +29,5 @@ val_data=${data} \
 val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
-train_dataloader.batch_size=256 \
-model.lr=5e-5
+model.lr=5e-6 \
+model.scale_weight_lr=1e-3

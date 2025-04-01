@@ -9,7 +9,7 @@ pl=24
 model=moirai_lightning_ckpt
 
 
-cpp='./outputs/pf/pf/finetune/moirai_1.0_R_small/pf/full/turkey_power/cl1000_pl24/checkpoints/epoch_9-step_8830.ckpt'
+cpp='./outputs/pf/multi_scale/finetune/moirai_1.0_R_small/Turkey_Power_s0/freeze_ffn/turkey_power/cl1000_pl24/checkpoints/epoch_91-step_81236.ckpt'
 
 
 pretrained_model=$(echo $cpp | cut -d'/' -f6)

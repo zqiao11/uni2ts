@@ -40,3 +40,6 @@ patch_size: null
 context_length: null
 prediction_length: null
 finetune_pattern: adapter_only
+num_variates: null
+zero_shot: false
+warmup_checkpoint: null

@@ -54,6 +54,9 @@ from uni2ts.module.multi_scale.attn_bias import BinaryAttentionBias
 from peft import LoraConfig, LoraModel
 from torch import nn
 
+import matplotlib.pyplot as plt
+
+
 class SampleNLLLoss(_PackedNLLLoss):
     def reduce_loss(
         self,
@@ -1069,3 +1072,107 @@ class MoiraiForecast(L.LightningModule):
                 dtype=bool,
             )
         return transform
+
+
+    # def _format_preds(
+    #     self,
+    #     patch_size: int,
+    #     preds: Float[torch.Tensor, "sample batch combine_seq patch"],
+    #     target_dim: int,
+    #     reprs: Float[torch.Tensor, "batch combine_seq"]
+    # ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
+    #
+    #     preds_all_scales = []
+    #     sample = preds.size(0)
+    #
+    #     for i in range(self.num_new_scales+1):
+    #         if i == 0:
+    #             start = target_dim * self.context_token_length(
+    #                 patch_size, self.hparams.context_length
+    #             )
+    #             end = start + target_dim * self.prediction_token_length(
+    #                 patch_size, self.hparams.prediction_length
+    #             )
+    #             preds_i = preds[..., start:end, :patch_size]
+    #             preds_i = rearrange(
+    #                 preds_i,
+    #                 "sample ... (dim seq) patch -> ... sample (seq patch) dim",
+    #                 dim=target_dim,
+    #             )[..., : self.hparams.prediction_length, :]
+    #             preds_all_scales.append(preds_i)
+    #
+    #         else:
+    #             context_length = math.ceil(self.hparams.context_length/(self.ds_factor**i))
+    #             prediction_length = math.ceil(self.hparams.prediction_length / (self.ds_factor ** i))
+    #             start = end + target_dim * self.context_token_length(
+    #                 patch_size, context_length
+    #             )
+    #             end = start + target_dim * self.prediction_token_length(
+    #                 patch_size, prediction_length
+    #             )
+    #             preds_i = preds[..., start:end, :patch_size]
+    #             preds_i = rearrange(
+    #                 preds_i,
+    #                 "sample ... (dim seq) patch -> ... sample (seq patch) dim",
+    #                 dim=target_dim,
+    #             )[..., : prediction_length, :]
+    #             preds_all_scales.append(preds_i)
+    #
+    #     preds = None
+    #     weight = torch.softmax(self.scale_weights, dim=0)
+    #
+    #     # # ToDo: Context序列咋给进来？
+    #     # sample_idx = 0
+    #     # plot_context_len = 500
+    #     # past_time_series = past_target[sample_idx, -plot_context_len:, 0].cpu().numpy()
+    #
+    #     if self.print_weight is True:
+    #         print("scale_weights: {}".format(weight))
+    #         self.print_weight = False
+    #
+    #     # weight = repeat(weight, "bs k -> bs sample pred k", sample=sample, pred=self.hparams.prediction_length)
+    #
+    #     use_scale = 0
+    #
+    #     for i in range(self.num_new_scales+1):
+    #
+    #         if i != use_scale:
+    #             continue
+    #
+    #         preds_i = preds_all_scales[i]
+    #         scale_factor = self.ds_factor ** i
+    #
+    #         # # ToDo: 从preds_all_scales获取每个scale单独的、没上采样的horizon
+    #         # upsampled_pred_i = preds_i.repeat_interleave(scale_factor, dim=2)
+    #         # plot_pred_time_series = upsampled_pred_i[sample_idx, 0, :, 0].cpu().numpy()
+    #         #
+    #         # # Concatenate past and predicted time series
+    #         # full_time_series = np.concatenate([past_time_series, plot_pred_time_series])
+    #         #
+    #         # # Create a time axis for the plot
+    #         # time_axis = np.arange(len(full_time_series))
+    #         #
+    #         # # Plot the time series
+    #         # # Plot the past time series with one color
+    #         # plt.plot(time_axis[:len(past_time_series)], past_time_series, label="Past Time Series", color='blue')
+    #         #
+    #         # # Plot the predicted time series with another color
+    #         # plt.plot(time_axis[len(past_time_series):], plot_pred_time_series, label="Predicted Time Series",
+    #         #          color='orange')
+    #         # plt.xlabel("Time")
+    #         # plt.ylabel("Value")
+    #         # plt.title("Concatenated Time Series (Past + Predicted)")
+    #         # plt.legend()
+    #         # plt.grid(True)
+    #         # plt.show()
+    #         #
+    #         # end = 1
+    #
+    #         # if preds is None:
+    #         #     preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
+    #         # else:
+    #         #     preds += preds_i.repeat_interleave(scale_factor, dim=2)[:, :, :self.hparams.prediction_length, :] * weight[i].unsqueeze(-1)
+    #
+    #         preds = preds_i.repeat_interleave(scale_factor, dim=2)
+    #
+    #     return preds.squeeze(-1)

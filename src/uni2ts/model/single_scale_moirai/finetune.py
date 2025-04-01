@@ -72,7 +72,7 @@ from uni2ts.transform import (
 from .module import MoiraiModule
 
 from uni2ts.module.multi_scale.attention import GroupedQueryAttention
-from peft import LoraConfig, LoraModel
+from peft import LoraConfig, LoraModel, AdaLoraConfig, AdaLoraModel
 
 
 class MoiraiFinetune(L.LightningModule):
@@ -117,6 +117,8 @@ class MoiraiFinetune(L.LightningModule):
         finetune_pattern: str | list[str] = "full",
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
+        use_adalora: bool = False,
+        adalora_kwargs: Optional[dict[str, Any]] = None,
 
         # full
         # in_proj
@@ -149,6 +151,9 @@ class MoiraiFinetune(L.LightningModule):
         # Lora config
         self.lora_config = LoraConfig(**lora_kwargs) if use_lora else None
 
+        # AdaLora config
+        self.adalora_config = AdaLoraConfig(**adalora_kwargs) if use_adalora else None
+
     def post_init(self):
         # Note: Only set 'post_attn_dp'. The performance decreases when using dp in FFN.
         if self.dropout_p > 0:
@@ -164,6 +169,18 @@ class MoiraiFinetune(L.LightningModule):
 
         if self.lora_config is not None:
             self.module = LoraModel(self.module, self.lora_config, "default")
+            # Params not used in Lora are set as requires_grad=False automatically.
+            # Activate some of those params manually. FFN and out_proj are kept as frozen.
+            for pn, p in self.named_parameters():
+                if "param_proj" in pn or "in_proj" in pn:
+                    p.requires_grad = True
+                if "norm" in pn:
+                    p.requires_grad = True
+                if "mask_encoding" in pn or "var_attn_bias" in pn:
+                    p.requires_grad = True
+
+        if self.adalora_config is not None:
+            self.module = AdaLoraModel(self.module, self.adalora_config, "default")
             # Params not used in Lora are set as requires_grad=False automatically.
             # Activate some of those params manually. FFN and out_proj are kept as frozen.
             for pn, p in self.named_parameters():
@@ -350,6 +367,8 @@ class MoiraiFinetune(L.LightningModule):
                     decay.add(fpn)
                 elif pn.endswith("weight") and isinstance(m, blacklist_params):
                     no_decay.add(fpn)
+                elif 'lora' in pn and 'default' in pn:
+                    decay.add(fpn)
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
@@ -436,9 +455,14 @@ class MoiraiFinetune(L.LightningModule):
                     fields=tuple(),
                     optional_fields=("past_feat_dynamic_real",),
                 )
+                # + InterpolateToPeriod(
+                #
+                # )
                 + EvalPad(
                     prediction_pad=-prediction_length % patch_size,
                     context_pad=-context_length % patch_size,
+                    # prediction_pad=-128 % patch_size,
+                    # context_pad=-4000 % patch_size,
                     fields=("target",),
                     optional_fields=("past_feat_dynamic_real",),
                 )
@@ -483,6 +507,7 @@ class MoiraiFinetune(L.LightningModule):
                 )
                 + EvalMaskedPrediction(
                     mask_length=math.ceil(prediction_length / patch_size),
+                    # mask_length=math.ceil(128 / patch_size),
                     target_field="target",
                     truncate_fields=(
                         "variate_id",

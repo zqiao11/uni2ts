@@ -155,26 +155,26 @@ def main(cfg: DictConfig):
     )
     L.seed_everything(cfg.seed + trainer.logger.version, workers=True)
 
-    print(
-        "Number of windows in finetune: ",
-        train_dataset.dataset_weight * train_dataset.num_ts,
-    )
-    print("Batch size for finetune: ", cfg.train_dataloader.batch_size)
-    print(
-        "Number of batches in a epoch: ",
-        train_dataset.dataset_weight
-        * train_dataset.num_ts
-        // cfg.train_dataloader.batch_size,
-    )
-
-    print("Number of windows in val: ", val_dataset.dataset_weight * val_dataset.num_ts)
-    print("Batch size for val: ", cfg.val_dataloader.batch_size)
-    print(
-        "Number of batches in a epoch: ",
-        val_dataset.dataset_weight
-        * val_dataset.num_ts
-        // cfg.val_dataloader.batch_size,
-    )
+    # print(
+    #     "Number of windows in finetune: ",
+    #     train_dataset.dataset_weight * train_dataset.num_ts,
+    # )
+    # print("Batch size for finetune: ", cfg.train_dataloader.batch_size)
+    # print(
+    #     "Number of batches in a epoch: ",
+    #     train_dataset.dataset_weight
+    #     * train_dataset.num_ts
+    #     // cfg.train_dataloader.batch_size,
+    # )
+    #
+    # print("Number of windows in val: ", val_dataset.dataset_weight * val_dataset.num_ts)
+    # print("Batch size for val: ", cfg.val_dataloader.batch_size)
+    # print(
+    #     "Number of batches in a epoch: ",
+    #     val_dataset.dataset_weight
+    #     * val_dataset.num_ts
+    #     // cfg.val_dataloader.batch_size,
+    # )
 
     # Validate before training, check the performance of original pretrained model.
     # trainer.validate(model, datamodule=DataModule(cfg, train_dataset, val_dataset))
@@ -184,6 +184,25 @@ def main(cfg: DictConfig):
         datamodule=DataModule(cfg, train_dataset, val_dataset),
         ckpt_path=cfg.ckpt_path,
     )
+
+    if hasattr(model, "online_metrics"):
+        import numpy as np
+        online_mse = np.mean(model.online_metrics['mse'])
+        online_mae = np.mean(model.online_metrics['mae'])
+        online_mape = np.mean(model.online_metrics['mape'])
+        online_smape = np.mean(model.online_metrics['smape'])
+        # online_mase = np.mean(model.online_metrics['mase'])
+        print(f'Online MSE: {online_mse:.3f}')
+        print(f'Online MAE: {online_mae:.3f}')
+        print(f'Online MAPE: {online_mape:.3f}')
+        print(f'Online SMAPE: {online_smape:.3f}')
+        # print(f'Online MASE: {online_mase:.3f}')
+
+        # print(model.in_cali.weight.data)
+        # print(model.in_cali.gating.data)
+        #
+        # print(model.out_cali.weight.data)
+        # print(model.out_cali.gating.data)
 
 
 if __name__ == "__main__":

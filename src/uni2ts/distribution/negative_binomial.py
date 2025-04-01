@@ -96,6 +96,19 @@ class NegativeBinomial(Distribution):
     def variance(self) -> torch.Tensor:
         return self.mean / torch.sigmoid(-self.logits)
 
+    def rsample(self, sample_shape: torch.Size = torch.Size()) -> torch.Tensor:
+        torch.autograd.set_detect_anomaly(True)
+        """ 允许梯度反传的采样方法 """
+        # 1. Gamma 分布是连续的，并且支持 rsample()
+        gamma_rv = Gamma(concentration=self.total_count, rate=torch.exp(-self.logits)).rsample(sample_shape)
+
+        # 2. 用 Gumbel-softmax trick 近似 Poisson 采样
+        poisson_noise = torch.randn_like(gamma_rv) * gamma_rv.sqrt()  # **确保不会修改 gamma_rv**
+        poisson_approx = gamma_rv + poisson_noise
+
+        # 3. Poisson 只能取正数，因此取 max(0, 近似值)
+        return poisson_approx.clamp(min=0)
+
 
 class NegativeBinomialOutput(DistributionOutput):
     distr_cls = NegativeBinomial

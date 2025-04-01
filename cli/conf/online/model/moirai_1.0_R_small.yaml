@@ -41,5 +41,4 @@ context_length: null
 prediction_length: null
 finetune_pattern: full
 zero_shot: false
-running_statistics: false
-data: null
+warmup_checkpoint: null

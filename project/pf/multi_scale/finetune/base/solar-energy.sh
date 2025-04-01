@@ -30,4 +30,5 @@ val_data.patch_size=${ps} \
 val_data.context_length=$cl \
 val_data.prediction_length=$pl \
 model.lr=5e-5 \
-model.scale_weight_lr=1e-2
+model.scale_weight_lr=1e-2 \
+train_dataloader.batch_size=128

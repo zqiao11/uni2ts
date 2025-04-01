@@ -31,7 +31,9 @@ from uni2ts.loss.packed import (
     PackedNLLLoss,
     PackedPointLoss,
     PackedMSELoss,
-    PackedMAELoss
+    PackedMAELoss,
+    PackedMAPELoss,
+    PackedSMAPELoss
 )
 from uni2ts.module.norm import RMSNorm
 from uni2ts.module.position import (
@@ -41,40 +43,8 @@ from uni2ts.module.position import (
 )
 from uni2ts.module.ts_embed import MultiInSizeLinear, MultiOutSizeLinear
 from uni2ts.optim import SchedulerType, get_scheduler
-from uni2ts.transform import (
-    AddObservedMask,
-    AddSampleIndex,
-    AddTimeIndex,
-    AddVariateIndex,
-    DefaultPatchSizeConstraints,
-    DummyValueImputation,
-    EvalCrop,
-    EvalMaskedPrediction,
-    EvalPad,
-    ExtendMask,
-    FinetunePatchCrop,
-    FixedPatchSizeConstraints,
-    FlatPackCollection,
-    FlatPackFields,
-    GetPatchSize,
-    Identity,
-    ImputeTimeSeries,
-    MaskedPrediction,
-    MaskedPredictionGivenFixedConfig,
-    MaskOutRangePaddedTokens,
-    PackFields,
-    PatchCrop,
-    PatchCropGivenFixedConfig,
-    Patchify,
-    SelectFields,
-    SequencifyField,
-    Transformation,
-)
-
 from .module import MoiraiModule
-
-from uni2ts.module.multi_scale.attention import GroupedQueryAttention
-from peft import LoraConfig, LoraModel
+from .finetune import MoiraiOnline
 
 
 class GCM(nn.Module):
@@ -99,23 +69,7 @@ class GCM(nn.Module):
         return x
 
 
-class TafasMoiraiOnline(L.LightningModule):
-    seq_fields: tuple[str, ...] = (
-        "target",
-        "observed_mask",
-        "time_id",
-        "variate_id",
-        "prediction_mask",
-        "patch_size",
-    )
-    pad_func_map: dict[str, Callable[[Sequence[int], np.dtype], np.ndarray]] = {
-        "target": np.zeros,
-        "observed_mask": np.zeros,
-        "time_id": np.zeros,
-        "variate_id": np.zeros,
-        "prediction_mask": np.zeros,
-        "patch_size": np.zeros,
-    }
+class TafasMoiraiOnline(MoiraiOnline):
 
     def __init__(
         self,
@@ -138,30 +92,36 @@ class TafasMoiraiOnline(L.LightningModule):
         context_length: Optional[int | list[int]] = None,
         prediction_length: Optional[int | list[int]] = None,
         patch_size: Optional[int] = None,
-        finetune_pattern: str | list[str] = "adapter_only",
+        finetune_pattern: str | list[str] = "full",
+        zero_shot: bool = False,
+        num_variates: int = None,
     ):
-        super().__init__()
-        self.save_hyperparameters(ignore=["module"])
-        self.module = MoiraiModule(**module_kwargs) if module is None else module
+        super().__init__(
+            min_patches=min_patches,
+            min_mask_ratio=min_mask_ratio,
+            max_mask_ratio=max_mask_ratio,
+            max_dim=max_dim,
+            num_training_steps=num_training_steps,
+            num_warmup_steps=num_warmup_steps,
+            module_kwargs=module_kwargs,
+            module=module,
+            num_samples=num_samples,
+            beta1=beta1,
+            beta2=beta2,
+            loss_func=loss_func,
+            val_metric=val_metric,
+            lr=lr,
+            weight_decay=weight_decay,
+            log_on_step=log_on_step,
+            context_length=context_length,
+            prediction_length=prediction_length,
+            patch_size=patch_size,
+            finetune_pattern=finetune_pattern,
+            zero_shot=zero_shot,
+        )
 
-        self.context_length = context_length
-        self.prediction_length = prediction_length
-        self.patch_size = patch_size
-        self.finetune_pattern = finetune_pattern
-
-        self.online_metrics = {'mae': [], 'mse': []}
-
-        self.in_cali = GCM(window_len=self.context_length, n_var=7, var_wise=True)  # 先试下var
-        self.out_cali = GCM(window_len=self.prediction_length, n_var=7, var_wise=True)
-
-
-    @property
-    def num_ctx_patch(self):
-        return math.ceil(self.context_length / self.patch_size)
-
-    @property
-    def num_pred_patch(self):
-        return math.ceil(self.prediction_length / self.patch_size)
+        self.in_cali = GCM(window_len=self.context_length, n_var=num_variates, var_wise=True)  # 先试下var
+        self.out_cali = GCM(window_len=self.prediction_length, n_var=num_variates, var_wise=True)
 
     def _cali_target(self, target):
         # Apply Input Adapter (in_cali)
@@ -178,10 +138,10 @@ class TafasMoiraiOnline(L.LightningModule):
         # Restore shape (bs, num_ctx_patch, patch_size)
         cali_context_series_patched = cali_context_series_with_pad.reshape(target.size(0), self.num_ctx_patch,
                                                                         self.patch_size)
+        cali_target = target.clone()
+        cali_target[:, :self.num_ctx_patch, :self.patch_size] = cali_context_series_patched
 
-        target[:, :self.num_ctx_patch, :self.patch_size] = cali_context_series_patched
-
-        return target
+        return cali_target
 
     def _cali_pred(self, pred):
         # Apply Output Adapter (out_cali)
@@ -198,9 +158,10 @@ class TafasMoiraiOnline(L.LightningModule):
         # Restore shape (bs, num_pred_patch, patch_size)
         cali_pred_patch = cali_pred_series_with_pad.view(pred.size(0), self.num_pred_patch, self.patch_size)
 
-        pred[:, -self.num_pred_patch:, :self.patch_size] = cali_pred_patch  # Replace only the modified part
+        cali_pred = pred.clone()
+        cali_pred[:, -self.num_pred_patch:, :self.patch_size] = cali_pred_patch  # Replace only the modified part
 
-        return pred
+        return cali_pred
 
     def forward(
         self,
@@ -213,10 +174,10 @@ class TafasMoiraiOnline(L.LightningModule):
         patch_size: Int[torch.Tensor, "*batch seq_len"],
     ) -> Distribution:
 
-        target = self._cali_target(target)
+        cali_target = self._cali_target(target)
 
         distr = self.module(
-            target=target,
+            target=cali_target,
             observed_mask=observed_mask,
             sample_id=sample_id,
             time_id=time_id,
@@ -230,8 +191,8 @@ class TafasMoiraiOnline(L.LightningModule):
         self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
 
-        if batch_idx % self.prediction_length != 0:
-            return None  # 直接跳过
+        if batch_idx % self.prediction_length != 0:  # Skip the samples with overlapped horizon
+            return None
 
         self.online_val_step(batch, batch_idx)
 
@@ -241,11 +202,10 @@ class TafasMoiraiOnline(L.LightningModule):
 
         pred = distr.rsample(torch.Size((self.hparams.num_samples,)))  # ToDo: rsample保证梯度可以反传
         pred = torch.median(pred, dim=0).values  # ToDo: median不可导
-
-        pred = self._cali_pred(pred)
+        cali_pred = self._cali_pred(pred)
 
         loss = self.hparams.loss_func(
-            pred=pred,  # distr --> pred
+            pred=cali_pred,  # distr --> pred
             **{
                 field: batch[field]
                 for field in [
@@ -284,55 +244,50 @@ class TafasMoiraiOnline(L.LightningModule):
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
 
-        if self.hparams.val_metric is not None:
-            val_metrics = (
-                self.hparams.val_metric
-                if isinstance(self.hparams.val_metric, list)
-                else [self.hparams.val_metric]
+        val_metrics = (
+            self.hparams.val_metric
+            if isinstance(self.hparams.val_metric, list)
+            else [self.hparams.val_metric]
+        )
+
+        pred = distr.sample(torch.Size((self.hparams.num_samples,)))
+        pred = torch.median(pred, dim=0).values
+        pred = self._cali_pred(pred)
+
+        for metric_func in val_metrics:
+            metric = metric_func(
+                pred=pred,
+                **{
+                    field: batch[field]
+                    for field in [
+                        "target",
+                        "prediction_mask",
+                        "observed_mask",
+                        "sample_id",
+                        "variate_id",
+                    ]
+                },
             )
-            for metric_func in val_metrics:
-                if isinstance(metric_func, PackedPointLoss):
-                    pred = distr.sample(torch.Size((self.hparams.num_samples,)))
-                    pred = torch.median(pred, dim=0).values
+            if isinstance(metric_func, PackedMAELoss):
+                self.online_metrics['mae'].append(metric.item())
+            if isinstance(metric_func, PackedMSELoss):
+                self.online_metrics['mse'].append(metric.item())
+            if isinstance(metric_func, PackedMAPELoss):
+                self.online_metrics['mape'].append(metric.item())
+            if isinstance(metric_func, PackedSMAPELoss):
+                self.online_metrics['smape'].append(metric.item())
 
-                    # pred = self._cali_pred(pred)
-
-                elif isinstance(metric_func, PackedDistributionLoss):
-                    pred = distr
-                else:
-                    raise ValueError(f"Unsupported loss function: {metric_func}")
-
-                metric = metric_func(
-                    pred=pred,
-                    **{
-                        field: batch[field]
-                        for field in [
-                            "target",
-                            "prediction_mask",
-                            "observed_mask",
-                            "sample_id",
-                            "variate_id",
-                        ]
-                    },
-                )
-
-                if isinstance(metric_func, PackedMAELoss):
-                    self.online_metrics['mae'].append(metric.item())
-
-                if isinstance(metric_func, PackedMSELoss):
-                    self.online_metrics['mse'].append(metric.item())
-
-                self.log(
-                    f"val/{metric_func.__class__.__name__}",
-                    metric,
-                    on_step=self.hparams.log_on_step,
-                    on_epoch=True,
-                    prog_bar=True,
-                    logger=True,
-                    sync_dist=True,
-                    batch_size=batch_size,
-                    rank_zero_only=True,
-                )
+            self.log(
+                f"val/{metric_func.__class__.__name__}",
+                metric,
+                on_step=self.hparams.log_on_step,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+                rank_zero_only=True,
+            )
         self.train()
 
     def configure_optimizers(self) -> dict:
@@ -423,7 +378,7 @@ class TafasMoiraiOnline(L.LightningModule):
                     [param_dict[pn] for pn in sorted(cali_params)]
                 ),
                 "weight_decay": self.hparams.weight_decay,
-                "lr": 5e-4,  # Set different learning rate for cali parameters
+                "lr": self.hparams.lr,  # Set different learning rate for cali parameters
             },
         ]
 
@@ -447,157 +402,3 @@ class TafasMoiraiOnline(L.LightningModule):
                 "interval": "step",
             },
         }
-
-    @property
-    def train_transform_map(
-        self,
-    ) -> dict[str | type, Callable[..., Transformation]]:
-        def default_train_transform(
-            offset: int,
-            distance: int,
-            prediction_length: int,
-            context_length: int,
-            patch_size: int,
-        ):
-            return (
-                GetPatchSize(
-                    min_time_patches=self.hparams.min_patches,
-                    target_field="target",
-                    patch_sizes=self.module.patch_sizes,
-                    patch_size_constraints=FixedPatchSizeConstraints(patch_size),
-                    offset=True,
-                )
-                + EvalCrop(
-                    offset,
-                    distance,
-                    prediction_length,
-                    context_length,
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                )
-                + PackFields(
-                    output_field="target",
-                    fields=("target",),
-                )
-                + PackFields(
-                    output_field="past_feat_dynamic_real",
-                    fields=tuple(),
-                    optional_fields=("past_feat_dynamic_real",),
-                )
-                # + InterpolateToPeriod(
-                #
-                # )
-                + EvalPad(
-                    prediction_pad=-prediction_length % patch_size,
-                    context_pad=-context_length % patch_size,
-                    # prediction_pad=-128 % patch_size,
-                    # context_pad=-4000 % patch_size,
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                )
-                + AddObservedMask(
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                    observed_mask_field="observed_mask",
-                    collection_type=dict,
-                )
-                + ImputeTimeSeries(
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                    imputation_method=DummyValueImputation(value=0.0),
-                )
-                + Patchify(
-                    max_patch_size=max(self.module.patch_sizes),
-                    fields=("target", "observed_mask"),
-                    optional_fields=("past_feat_dynamic_real",),
-                )
-                + AddVariateIndex(
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                    variate_id_field="variate_id",
-                    expected_ndim=3,
-                    max_dim=self.hparams.max_dim,
-                    randomize=False,
-                    collection_type=dict,
-                )
-                + AddTimeIndex(
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                    time_id_field="time_id",
-                    expected_ndim=3,
-                    collection_type=dict,
-                )
-                + AddSampleIndex(
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                    sample_id_field="sample_id",
-                    expected_ndim=3,
-                    collection_type=dict,
-                )
-                + EvalMaskedPrediction(
-                    mask_length=math.ceil(prediction_length / patch_size),
-                    # mask_length=math.ceil(128 / patch_size),
-                    target_field="target",
-                    truncate_fields=(
-                        "variate_id",
-                        "time_id",
-                        "observed_mask",
-                        "sample_id",
-                    ),
-                    optional_truncate_fields=("past_feat_dynamic_real",),
-                    prediction_mask_field="prediction_mask",
-                    expected_ndim=3,
-                )
-                + ExtendMask(
-                    fields=tuple(),
-                    optional_fields=("past_feat_dynamic_real",),
-                    mask_field="prediction_mask",
-                    expected_ndim=3,
-                )
-                + FlatPackCollection(
-                    field="variate_id",
-                    feat=False,
-                )
-                + FlatPackCollection(
-                    field="time_id",
-                    feat=False,
-                )
-                + FlatPackCollection(
-                    field="sample_id",
-                    feat=False,
-                )
-                + FlatPackCollection(
-                    field="prediction_mask",
-                    feat=False,
-                )
-                + FlatPackCollection(
-                    field="observed_mask",
-                    feat=True,
-                )
-                + FlatPackFields(
-                    output_field="target",
-                    fields=("target",),
-                    optional_fields=("past_feat_dynamic_real",),
-                    feat=True,
-                )
-                + SequencifyField(field="patch_size", target_field="target")
-                + SelectFields(fields=list(self.seq_fields))
-            )
-
-        return defaultdict(lambda: default_train_transform)
-
-
-    def state_dict(self, *args, destination=None, prefix="", keep_vars=False):
-        """
-        Modify state_dict to only save trainable params.
-        Note the default state_dict saved by PL converts all params to require_grads=False
-        """
-        state = super().state_dict(
-            destination=destination, prefix=prefix, keep_vars=keep_vars
-        )
-        filtered_state = {
-            name: tensor
-            for name, tensor in state.items()
-            if name in self.updated_params
-        }
-        return filtered_state

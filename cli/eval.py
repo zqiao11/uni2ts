@@ -61,7 +61,7 @@ def main(cfg: DictConfig):
                 new_name = "module." + name
 
                 # # If using Lora, need to rename the pretrained weights before loading.
-                # if hyper_params['use_lora']:
+                # if hyper_params['use_lora'] or hyper_params['use_adalora']:
                 #     new_name = 'module.model.' + name
                 #     # In LoraModel, Lora's target_modules will be added a suffix '.base_layer'.
                 #     for module in lora_target_modules:

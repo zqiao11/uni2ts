@@ -4,7 +4,7 @@ export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_small
 cp=conf/lsf/multi_scale/finetune
-exp_name=Etth1_cl5000_w010_lr5e-7_wlr1e-7
+exp_name=zip_timeID
 data=etth1
 cl=5000
 ps=64

@@ -212,7 +212,9 @@ class EvalDataset(TimeSeriesDataset):
 
 
 class FinetuneDataset(TimeSeriesDataset):
-    """ """
+    """
+    This class is identical to EvalDataset. It is created solely to avoid confusion due to naming.
+    """
 
     def __init__(
         self,

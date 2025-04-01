@@ -15,7 +15,7 @@ max_epochs=1
 
 for pl in 24 48 96; do
   for ps in 32 64 128; do
-    for lr in 1e-4 1e-5; do  # 1e-3 is too large
+    for lr in 1e-4 1e-5; do
       python -m cli.train \
       -cp $cp \
       exp_name=$exp_name \
@@ -40,4 +40,4 @@ done
 
 # Prediction Length: 24, Patch Size: 64, Lr: 1e-05
 # Prediction Length: 48, Patch Size: 32, Lr: 1e-04
-# Prediction Length: 96, Patch Size: 128, Lr: 0.0001
+# Prediction Length: 96, Patch Size: 128, Lr: 5e-5

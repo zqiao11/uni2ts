@@ -130,7 +130,7 @@ class AddObservedMask(CollectFuncMixin, Transformation):
 @dataclass
 class AddSampleIndex(CollectFuncMixin, CheckArrNDimMixin, Transformation):
     """
-    Add sample_id. Follow the practice in MoiraiForecast. Only used when not using sequence packing.
+    Add sample_id when sequence packing is not used. Follow the implementation in MoiraiForecast.
     """
 
     fields: tuple[str, ...]

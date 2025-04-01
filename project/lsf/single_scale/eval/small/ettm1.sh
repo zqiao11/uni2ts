@@ -11,10 +11,10 @@ ps=128
 mode=S
 
 
-cpp1='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl96/checkpoints/epoch_15-step_3344.ckpt'
-cpp2='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl192/checkpoints/epoch_6-step_1456.ckpt'
-cpp3='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl336/checkpoints/epoch_3-step_828.ckpt'
-cpp4='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/direct_ft/freeze_ffn/ettm1/S/cl4000_pl720/checkpoints/epoch_2-step_612.ckpt'
+cpp1='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/ettm1/S/cl4000_pl96/checkpoints/epoch_117-step_24662.ckpt'
+cpp2='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/ettm1/S/cl4000_pl192/checkpoints/epoch_111-step_23296.ckpt'
+cpp3='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/ettm1/S/cl4000_pl336/checkpoints/epoch_69-step_14490.ckpt'
+cpp4='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/ettm1/S/cl4000_pl720/checkpoints/epoch_42-step_8772.ckpt'
 
 index=1
 for pl in 96 192 336 720; do

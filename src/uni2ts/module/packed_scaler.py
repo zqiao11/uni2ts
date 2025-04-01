@@ -117,8 +117,10 @@ class PackedStdScaler(PackedScaler):
         )
         var = safe_div(var, (tobs - self.correction))
         scale = torch.sqrt(var + self.minimum_scale)
-        loc[sample_id == 0] = 0
-        scale[sample_id == 0] = 1
+
+        # ToDo: Remove the in_place operation in order to add in_adapter for online learning
+        # loc[sample_id == 0] = 0
+        # scale[sample_id == 0] = 1
         return loc, scale
 
 

@@ -8,13 +8,13 @@ cp=conf/lsf/multi_scale/eval
 cl=5000
 model=moirai_lightning_ckpt
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_w010_lr1e-7_wlr1e-5/freeze_ffn/etth1/S/cl5000_pl96/checkpoints/epoch_7-step_1552.ckpt'
-cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_w010_lr1e-7_wlr1e-5/freeze_ffn/etth1/S/cl5000_pl192/checkpoints/epoch_4-step_945.ckpt'
-cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_w010_lr1e-7_wlr1e-5/freeze_ffn/etth1/S/cl5000_pl336/checkpoints/epoch_1-step_362.ckpt'
-cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_w010_lr1e-7_wlr1e-5/freeze_ffn/etth1/S/cl5000_pl720/checkpoints/epoch_0-step_160.ckpt'
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_lr1e-7_wlr1e-3/freeze_ffn/etth1/S/cl5000_pl96/checkpoints/epoch_12-step_2522.ckpt'
+cpp2='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_lr1e-7_wlr1e-3/freeze_ffn/etth1/S/cl5000_pl192/checkpoints/epoch_10-step_2079.ckpt'
+cpp3='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_lr1e-7_wlr1e-3/freeze_ffn/etth1/S/cl5000_pl336/checkpoints/epoch_0-step_181.ckpt'
+cpp4='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_base/Base_Etth1_lr1e-7_wlr1e-3/freeze_ffn/etth1/S/cl5000_pl720/checkpoints/epoch_0-step_160.ckpt'
 
-index=1
-for pl in 96 192 336 720; do
+index=2
+for pl in 192 336 720 ; do  #
   case $index in
     1) cpp=$cpp1 ;;
     2) cpp=$cpp2 ;;

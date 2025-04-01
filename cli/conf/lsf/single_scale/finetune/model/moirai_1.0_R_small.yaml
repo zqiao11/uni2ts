@@ -47,3 +47,12 @@ lora_kwargs:
   target_modules: ["q_proj", "k_proj", "v_proj"]
   lora_alpha: 32
   lora_dropout: 0.05
+
+use_adalora: False
+adalora_kwargs:
+  _target_: builtins.dict
+  target_r: 8
+  init_r: 12
+  target_modules: ["q_proj", "k_proj", "v_proj"]
+  lora_alpha: 32
+  lora_dropout: 0.05

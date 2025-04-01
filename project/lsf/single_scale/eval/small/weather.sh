@@ -1,7 +1,7 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
 cp=conf/lsf/single_scale/eval
 model=moirai_lightning_ckpt
@@ -11,10 +11,10 @@ ps=128
 mode=S
 
 
-cpp1='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl96/checkpoints/epoch_22-step_16422.ckpt'
-cpp2='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl192/checkpoints/epoch_17-step_12816.ckpt'
-cpp3='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl336/checkpoints/epoch_11-step_8508.ckpt'
-cpp4='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/lsf/full/weather/S/cl2000_pl720/checkpoints/epoch_8-step_6309.ckpt'
+cpp1='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/weather/S/cl2000_pl96/checkpoints/epoch_69-step_49980.ckpt'
+cpp2='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/weather/S/cl2000_pl192/checkpoints/epoch_49-step_35600.ckpt'
+cpp3='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/weather/S/cl2000_pl336/checkpoints/epoch_69-step_49630.ckpt'
+cpp4='./outputs/lsf/single_scale/finetune/moirai_1.0_R_small/default/head_only/weather/S/cl2000_pl720/checkpoints/epoch_107-step_75708.ckpt'
 
 index=1
 for pl in 96 192 336 720 ; do

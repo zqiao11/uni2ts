@@ -1,10 +1,10 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=2;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=3;
 
 model=moirai_1.0_R_small
 cp=conf/pf/multi_scale/finetune
-exp_name=in_proj_attn_lora_lr5e-6_patience10
+exp_name=Turkey_Power_swlr1e-3
 cl=1000
 pl=24
 ft_pattern=freeze_ffn
@@ -31,4 +31,5 @@ val_data.context_length=$cl \
 val_data.prediction_length=$pl \
 trainer.callbacks.'2'.patience=10 \
 trainer.callbacks.1.save_last=true \
-model.lr=5e-6
+model.lr=5e-6 \
+model.scale_weight_lr=1e-3

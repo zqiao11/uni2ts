@@ -139,8 +139,8 @@ if __name__ == "__main__":
         dataset_type=args.dataset_type,
         offset=val_offset,
         freq=args.freq,
-        mean=None,  # warmup_dataset_builder.mean,
-        std=None,   # warmup_dataset_builder.std,
+        mean= warmup_dataset_builder.mean if args.normalize else None,
+        std= warmup_dataset_builder.std if args.normalize else None,
     )
 
     # Online dataset: Use full dataset. Set 'offset' as val_offset in cli config to indicate the start of online stage.
@@ -156,8 +156,8 @@ if __name__ == "__main__":
         file=Path(args.file_path),
         dataset_type=args.dataset_type,
         freq=args.freq,
-        mean=None,  # warmup_dataset_builder.mean,
-        std=None   # warmup_dataset_builder.std,
+        mean=warmup_dataset_builder.mean if args.normalize else None,
+        std=warmup_dataset_builder.std if args.normalize else None,
     )
 
     if not args.normalize:

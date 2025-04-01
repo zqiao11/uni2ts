@@ -1,0 +1,170 @@
+#  Copyright (c) 2024, Salesforce, Inc.
+#  SPDX-License-Identifier: Apache-2
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at
+#
+#      http://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#  See the License for the specific language governing permissions and
+#  limitations under the License.
+
+import hydra
+import pandas as pd
+import torch
+from gluonts.time_feature import get_seasonality
+from hydra.core.hydra_config import HydraConfig
+from hydra.utils import call, instantiate
+from omegaconf import DictConfig
+from torch.utils.tensorboard import SummaryWriter
+
+from uni2ts.common import hydra_util  # noqa: hydra resolvers
+from uni2ts.eval_util.evaluation import evaluate_model
+
+from uni2ts.eval_util.plot import plot_single, plot_next_multi
+import matplotlib.pyplot as plt
+
+
+@hydra.main(version_base="1.3", config_path="conf/origin/eval", config_name="default")
+def main(cfg: DictConfig):
+    # Set display options
+    pd.set_option("display.max_columns", None)
+    pd.set_option("display.width", None)
+    pd.set_option("display.max_colwidth", None)
+    pd.options.display.float_format = "{:.3f}".format
+
+    test_data, metadata = call(cfg.data)
+    batch_size = cfg.batch_size
+
+    while True:
+        model = call(cfg.model, _partial_=True, _convert_="all")(
+            prediction_length=metadata.prediction_length,
+            target_dim=metadata.target_dim,
+            feat_dynamic_real_dim=metadata.feat_dynamic_real_dim,
+            past_feat_dynamic_real_dim=metadata.past_feat_dynamic_real_dim,
+        )
+
+        # QZ: If eval the finetuned model, need to load moirai's frozen params manually.
+        if "pretrained_checkpoint_path" in cfg.model:
+            checkpoint = torch.load(cfg.model.checkpoint_path)
+            hyper_params = checkpoint['hyper_parameters']
+            lora_target_modules = hyper_params['lora_kwargs']['target_modules']
+
+            tuned_state_dict = checkpoint["state_dict"]
+            pretrained_moirai_state_dict = torch.load(
+                cfg.model.pretrained_checkpoint_path, weights_only=True
+            )
+
+            new_state_dict = {}
+            for name, tensor in pretrained_moirai_state_dict.items():
+                new_name = "module." + name
+
+                # # If using Lora, need to rename the pretrained weights before loading.
+                # if hyper_params['use_lora']:
+                #     new_name = 'module.model.' + name
+                #     # In LoraModel, Lora's target_modules will be added a suffix '.base_layer'.
+                #     for module in lora_target_modules:
+                #         if module in new_name:
+                #             new_name = new_name.replace(module, module + '.base_layer')
+                #             break
+                # else:
+                #     new_name = "module." + name
+                new_state_dict[new_name] = tensor
+            pretrained_moirai_state_dict = new_state_dict
+
+            frozen_moirai_state_dict = {
+                name: tensor
+                for name, tensor in pretrained_moirai_state_dict.items()
+                if name not in tuned_state_dict
+            }
+
+            model.load_state_dict(frozen_moirai_state_dict, strict=False)
+
+
+        metrics = instantiate(cfg.metrics, _convert_="all")
+        try:
+            predictor = model.create_predictor(batch_size, cfg.device)
+
+            forecasts = predictor.predict(test_data.input)
+
+            input_it = iter(test_data.input)
+            label_it = iter(test_data.label)
+            forecast_it = iter(forecasts)
+
+            for i in range(6):
+                for _ in range(2500):
+                    next(input_it)
+                    next(label_it)
+                    next(forecast_it)
+
+                inp = next(input_it)
+                label = next(label_it)
+                forecast = next(forecast_it)
+
+                fig, axes = plt.subplots(nrows=1, ncols=1, figsize=(8, 6))
+                # fig, axes = plt.subplots(nrows=2, ncols=3, figsize=(25, 10))
+
+                plot_single(
+                    inp,
+                    label,
+                    forecast,
+                    context_length=200,
+                    intervals=(),
+                    ax=axes,
+                    dim=None,
+                    name="pred",
+                    show_label=True,
+                )
+
+                # plot_next_multi(
+                #     axes,
+                #     input_it,
+                #     label_it,
+                #     forecast_it,
+                #     context_length=200,
+                #     intervals=(0.5, 0.9),
+                #     dim=None,
+                #     name="pred",
+                #     show_label=True,
+                # )
+                plt.tight_layout()
+                plt.show()
+                end = 1
+
+
+            # res = evaluate_model(
+            #     predictor,
+            #     test_data=test_data,
+            #     metrics=metrics,
+            #     batch_size=cfg.batch_size,
+            #     axis=None,
+            #     mask_invalid_label=True,
+            #     allow_nan_forecast=False,
+            #     seasonality=get_seasonality(metadata.freq),
+            # )
+            # print(res)
+            # output_dir = HydraConfig.get().runtime.output_dir
+            # writer = SummaryWriter(log_dir=output_dir)
+            # for name, metric in res.to_dict("records")[0].items():
+            #     writer.add_scalar(f"{metadata.split}_metrics/{name}", metric)
+            # writer.close()
+            # break
+        except torch.cuda.OutOfMemoryError:
+            print(
+                f"OutOfMemoryError at batch_size {batch_size}, reducing to {batch_size//2}"
+            )
+            batch_size //= 2
+            if batch_size < cfg.min_batch_size:
+                print(
+                    f"batch_size {batch_size} smaller than "
+                    f"min_batch_size {cfg.min_batch_size}, ending evaluation"
+                )
+                break
+
+
+if __name__ == "__main__":
+    main()

@@ -75,20 +75,6 @@ from uni2ts.transform import (
 
 from .module import MoiraiModule
 
-from uni2ts.module.multi_scale.attention import GroupedQueryAttention
-from peft import LoraConfig, LoraModel
-import pickle
-
-
-warmup_lengths = {
-    'ETTh1': 2880,
-    'ETTh2': 2880,
-    'ETTm1': 11520,
-    'ETTm2': 11520,
-    'weather': 10539,
-    'electricity': 5260
-}
-
 
 class MoiraiOnline(L.LightningModule):
     seq_fields: tuple[str, ...] = (
@@ -131,8 +117,7 @@ class MoiraiOnline(L.LightningModule):
         patch_size: Optional[int] = None,
         finetune_pattern: str | list[str] = "full",
         zero_shot: bool = False,
-        running_statistics: bool = False,
-        data: Optional[str] = None,
+        warmup_checkpoint: str = None
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
@@ -144,30 +129,14 @@ class MoiraiOnline(L.LightningModule):
         self.finetune_pattern = finetune_pattern
 
         self.zero_shot = zero_shot
-
         self.online_metrics = {'mae': [], 'mse': [], 'mape': [], 'smape': []}
-
-        self.running_statistics = running_statistics
-        if running_statistics:
-            assert data is not None, "Data must be specified for running statistics"
-            stats_path = '/home/zhongzheng/uni2ts/dataset/online_warmup_statistics/' + f"{data}.pkl"
-            with open(stats_path, "rb") as f:
-                stats = pickle.load(f)
-                mean = torch.tensor(stats["mean"].to_numpy())
-                std = torch.tensor(stats["std"].to_numpy())
-                self.register_buffer("mean", mean)  # shape: (var,)
-                self.register_buffer("std", std)  # shape: (var,)
-
-                self.register_buffer("std0", std)  # shape: (var,)
-
-                # self.momentum = 0.0001
-
-                self.L = warmup_lengths[data]
-                self.flag_first_sample = True
-
         print(f"======== Prediction Length: {prediction_length}, Patch Size: {patch_size}, Lr: {lr} ========")
 
-
+    def post_init(self):
+        if self.hparams.warmup_checkpoint is not None:
+            checkpoint = torch.load(self.hparams.warmup_checkpoint, weights_only=True)
+            state_dict = checkpoint["state_dict"]
+            self.load_state_dict(state_dict, strict=False)
 
     @property
     def num_ctx_patch(self):
@@ -176,69 +145,6 @@ class MoiraiOnline(L.LightningModule):
     @property
     def num_pred_patch(self):
         return math.ceil(self.prediction_length / self.patch_size)
-
-    def _norm_target(self, target):
-
-        # Context series
-        context_series_with_pad = target[:, :self.num_ctx_patch, :self.patch_size].reshape(target.size(0), -1)
-        context_series = context_series_with_pad[:, -self.context_length:]  # (var, len)
-
-        # batch_mean = context_series.mean(dim=1)
-        # batch_std = context_series.std(dim=1, unbiased=False)  # (var,)
-        # self.mean = (1 - self.momentum) * self.mean + self.momentum * batch_mean
-        # self.std = (1 - self.momentum) * self.std + self.momentum * batch_std
-
-
-        # Compute new_mean and new_std with context series
-        K = self.context_length if self.flag_first_sample else self.prediction_length
-        batch_mean = context_series[:, -K:].mean(dim=1)
-        batch_std = context_series[:, -K:].std(dim=1, unbiased=False)  # (var,)
-        new_mean = (self.L * self.mean + K * batch_mean) / (self.L + K)
-        new_var = (
-                (self.L * (self.std ** 2 + (self.mean - new_mean) ** 2) +
-                 K * (batch_std ** 2 + (batch_mean - new_mean) ** 2)) / (self.L + K)
-        )
-        new_std = torch.sqrt(new_var + 1e-10)  # 避免 sqrt(0)
-
-        # 用调整过的mean, std对context, target做norm
-        mean = new_mean.view(-1, 1)
-        std = new_std.view(-1, 1)
-
-        normed_context_series = (context_series - mean) / (std + 1e-10)
-
-        # Restore padding
-        cali_context_series_with_pad = torch.cat([
-            context_series_with_pad[:, :-self.context_length],
-            normed_context_series,
-        ], dim=1)
-
-        # Restore shape (bs, num_ctx_patch, patch_size)
-        cali_context_series_patched = cali_context_series_with_pad.reshape(target.size(0), self.num_ctx_patch,
-                                                                        self.patch_size)
-
-        target[:, :self.num_ctx_patch, :self.patch_size] = cali_context_series_patched
-
-        # Target series
-        pred_series_with_pad = target[:, -self.num_pred_patch:, :self.patch_size].reshape(target.size(0), -1)
-        pred_series = pred_series_with_pad[:, :self.prediction_length]
-        cali_pred_series = (pred_series - mean) / (std + 1e-10)
-
-        # Restore padding
-        cali_pred_series_with_pad = torch.cat([
-            cali_pred_series,
-            pred_series_with_pad[:, self.prediction_length:],
-        ], dim=1)
-
-        # Restore shape (bs, num_pred_patch, patch_size)
-        cali_pred_patch = cali_pred_series_with_pad.view(target.size(0), self.num_pred_patch, self.patch_size)
-
-        target[:, -self.num_pred_patch:, :self.patch_size] = cali_pred_patch  # Replace only the modified part
-
-        self.mean = new_mean
-        self.std = new_std
-        self.L += K
-
-        return target
 
     def forward(
         self,
@@ -265,19 +171,13 @@ class MoiraiOnline(L.LightningModule):
         self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
 
-        if batch_idx % self.prediction_length != 0:
-            return None  # 直接跳过
-
-        if self.running_statistics:
-            batch["target"] = self._norm_target(batch["target"])  # 对target做norm,且更新self.mean， self.std
-            if self.flag_first_sample:
-                self.flag_first_sample = False
-
-        self.online_val_step(batch, batch_idx)
-
-        if self.zero_shot:
+        if batch_idx % self.prediction_length != 0:  # Skip the samples with overlapped horizon
             return None
 
+        self.online_val_step(batch, batch_idx)  # Online evaluation
+
+        if self.zero_shot:  # Skip finetuning process for zero-shot evaluation
+            return None
         else:
             distr = self(
                 **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
@@ -309,7 +209,6 @@ class MoiraiOnline(L.LightningModule):
                 batch_size=batch_size,
                 rank_zero_only=True,
             )
-
             return loss
 
     @torch.no_grad()
@@ -346,104 +245,51 @@ class MoiraiOnline(L.LightningModule):
             rank_zero_only=True,
         )
 
-        if self.hparams.val_metric is None:
-            raise ValueError("val_metric must be provided for online evaluation")
-        else:
-            val_metrics = (
-                self.hparams.val_metric
-                if isinstance(self.hparams.val_metric, list)
-                else [self.hparams.val_metric]
+        val_metrics = (
+            self.hparams.val_metric
+            if isinstance(self.hparams.val_metric, list)
+            else [self.hparams.val_metric]
+        )
+
+        pred = distr.sample(torch.Size((self.hparams.num_samples,)))
+        pred = torch.median(pred, dim=0).values
+
+        # self.online_metrics['mase'].append(self.compute_MASE(pred, batch['target']))
+
+        for metric_func in val_metrics:
+            metric = metric_func(
+                pred=pred,
+                **{
+                    field: batch[field]
+                    for field in [
+                        "target",
+                        "prediction_mask",
+                        "observed_mask",
+                        "sample_id",
+                        "variate_id",
+                    ]
+                },
             )
-            for metric_func in val_metrics:
-                if isinstance(metric_func, PackedPointLoss):
-                    pred = distr.sample(torch.Size((self.hparams.num_samples,)))
-                    pred = torch.median(pred, dim=0).values
-                elif isinstance(metric_func, PackedDistributionLoss):
-                    pred = distr
-                else:
-                    raise ValueError(f"Unsupported loss function: {metric_func}")
+            if isinstance(metric_func, PackedMAELoss):
+                self.online_metrics['mae'].append(metric.item())
+            if isinstance(metric_func, PackedMSELoss):
+                self.online_metrics['mse'].append(metric.item())
+            if isinstance(metric_func, PackedMAPELoss):
+                self.online_metrics['mape'].append(metric.item())
+            if isinstance(metric_func, PackedSMAPELoss):
+                self.online_metrics['smape'].append(metric.item())
 
-
-                if isinstance(metric_func, PackedMAELoss) or isinstance(metric_func, PackedMSELoss):
-
-                    if self.running_statistics:
-                        # ToDO: 对于online norm的metrics，得rescale回原尺度
-                        metric = metric_func(                # (bs, num_patch, max_ps)
-                            pred=pred,
-                            return_loss_batchwise=True,
-                            **{
-                                field: batch[field]
-                                for field in [
-                                    "target",
-                                    "prediction_mask",
-                                    "observed_mask",
-                                    "sample_id",
-                                    "variate_id",
-                                ]
-                            },
-                        )
-
-                        metric = metric.sum(dim=(-1, -2))  # (bs)  metric_per_variate
-
-                        if isinstance(metric_func, PackedMAELoss):
-                            metric = (metric * (self.std / self.std0)).sum()  # rescale to origin scale
-                            self.online_metrics['mae'].append(metric.item())
-
-                        if isinstance(metric_func, PackedMSELoss):
-                            metric = (metric * (self.std / self.std0) ** 2).sum()
-                            self.online_metrics['mse'].append(metric.item())
-
-                    else:
-                        metric = metric_func(
-                            pred=pred,
-                            **{
-                                field: batch[field]
-                                for field in [
-                                    "target",
-                                    "prediction_mask",
-                                    "observed_mask",
-                                    "sample_id",
-                                    "variate_id",
-                                ]
-                            },
-                        )
-                        if isinstance(metric_func, PackedMAELoss):
-                            self.online_metrics['mae'].append(metric.item())
-
-                        if isinstance(metric_func, PackedMSELoss):
-                            self.online_metrics['mse'].append(metric.item())
-
-                elif isinstance(metric_func, PackedMAPELoss) or isinstance(metric_func, PackedSMAPELoss):
-                    metric = metric_func(
-                        pred=pred,
-                        **{
-                            field: batch[field]
-                            for field in [
-                                "target",
-                                "prediction_mask",
-                                "observed_mask",
-                                "sample_id",
-                                "variate_id",
-                            ]
-                        },
-                    )
-                    if isinstance(metric_func, PackedMAPELoss):
-                        self.online_metrics['mape'].append(metric.item())
-
-                    if isinstance(metric_func, PackedSMAPELoss):
-                        self.online_metrics['smape'].append(metric.item())
-
-                self.log(
-                    f"val/{metric_func.__class__.__name__}",
-                    metric,
-                    on_step=self.hparams.log_on_step,
-                    on_epoch=True,
-                    prog_bar=True,
-                    logger=True,
-                    sync_dist=True,
-                    batch_size=batch_size,
-                    rank_zero_only=True,
-                )
+            self.log(
+                f"val/{metric_func.__class__.__name__}",
+                metric,
+                on_step=self.hparams.log_on_step,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+                batch_size=batch_size,
+                rank_zero_only=True,
+            )
         self.train()
 
     def configure_optimizers(self) -> dict:
@@ -691,3 +537,25 @@ class MoiraiOnline(L.LightningModule):
             if name in self.updated_params
         }
         return filtered_state
+
+    @torch.no_grad()
+    def compute_MASE(self, pred, target):
+        # ToDo: Have issues of nan and inf values...
+        pred_series_with_pad = pred[:, -self.num_pred_patch:, :self.patch_size].reshape(pred.size(0), -1)
+        pred_series = pred_series_with_pad[:, :self.prediction_length]  # (bs, pred_len)
+
+        target_series_with_pad = target[:, -self.num_pred_patch:, :self.patch_size].reshape(pred.size(0), -1)
+        target_series = target_series_with_pad[:, :self.prediction_length]  # (bs, pred_len)
+
+        # 分子：预测误差
+        numerator = torch.abs(pred_series - target_series)  # (bs, pred_len)
+
+        # 分母：seasonal naive baseline 误差
+        s = 1 # 用户需要确保 self.seasonality 已定义. 但是pred长度太短，很多Seasonality直接超了. 所以直接设成1
+
+        denom_series = torch.abs(
+            target_series[:, s:] - target_series[:, :-s]
+        )  # (bs, F-s)
+        denom = denom_series.mean(dim=1, keepdim=True)  # (bs, 1)
+        mase = (numerator / denom).mean(dim=1)  # (bs,)
+        return mase.mean().item()  # 返回 batch 的平均 MASE

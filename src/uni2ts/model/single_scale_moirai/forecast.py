@@ -41,7 +41,7 @@ from uni2ts.loss.packed import PackedNLLLoss as _PackedNLLLoss
 
 from .module import MoiraiModule
 
-from peft import LoraConfig, LoraModel
+from peft import LoraConfig, LoraModel, AdaLoraConfig, AdaLoraModel
 
 
 class SampleNLLLoss(_PackedNLLLoss):
@@ -87,6 +87,8 @@ class MoiraiForecast(L.LightningModule):
         pretrained_checkpoint_path: str = None,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
+        use_adalora: bool = False,
+        adalora_kwargs: Optional[dict[str, Any]] = None,
     ):
         assert (module is not None) or (
             module_kwargs is not None
@@ -101,6 +103,10 @@ class MoiraiForecast(L.LightningModule):
         if use_lora:
             self.lora_config = LoraConfig(**lora_kwargs)
             self.module = LoraModel(self.module, self.lora_config, "default")
+
+        if use_adalora:
+            self.adalora_config = AdaLoraConfig(**adalora_kwargs)
+            self.module = AdaLoraModel(self.module, self.adalora_config, "default")
 
     @contextmanager
     def hparams_context(

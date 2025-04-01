@@ -65,6 +65,37 @@ def seasonal_naive_predict(context: np.ndarray, prediction: np.ndarray) -> np.nd
     return forecast
 
 
+import numpy as np
+
+
+def numpy_interpolate(time_series: np.ndarray, p1: int, p2: int) -> np.ndarray:
+    """
+    使用 NumPy 进行插值，将每 p1 个点扩展为 p2 个点。
+
+    参数：
+    - time_series: 2D np.ndarray，形状为 (1, L)，即单个时间序列
+    - p1: 原始采样间隔
+    - p2: 目标插值的采样间隔
+
+    返回：
+    - 插值后的 2D np.ndarray，形状为 (1, new_L)
+    """
+    if time_series.shape[0] != 1:
+        raise ValueError("time_series 应该是形状 (1, L) 的 NumPy 数组")
+
+    L = time_series.shape[1]  # 原始序列长度
+    new_L = int(L * (p2 / p1))  # 计算插值后的长度
+
+    # 生成原始索引和目标插值索引
+    x_old = np.linspace(0, L - 1, L)  # 原始点的索引
+    x_new = np.linspace(0, L - 1, new_L)  # 插值后的索引
+
+    # 进行线性插值
+    interpolated_series = np.interp(x_new, x_old, time_series.flatten()).reshape(1, -1)
+
+    return interpolated_series
+
+
 @dataclass
 class GetSeasonalNaivePrediction(Transformation):
     """
@@ -189,3 +220,65 @@ class SeasonalNaiveEvalCrop(MapFuncMixin, Transformation):
             assert 0 >= b > a >= -time
 
         return a, b
+
+
+class InterpolateToPeriod(Transformation):
+    def __call__(self, data_entry: dict[str, Any]) -> dict[str, Any]:
+        target = data_entry["target"].copy()
+        context_length = data_entry["context_length"]
+        prediction_length = data_entry["prediction_length"]
+        patch_size = data_entry["patch_size"]
+
+        context = target[:, :context_length]
+        prediction = target[:, -prediction_length:]
+
+        context = numpy_interpolate(context, 96, patch_size)
+        prediction = numpy_interpolate(prediction, 96, patch_size)
+
+        interpolated_target = np.concatenate([context, prediction], axis=1)
+
+        data_entry["target"] = interpolated_target
+
+        # feat, context_len = context.shape
+        # context = context[0]
+        # fft_result = np.fft.fft(context)  # 计算 FFT
+        # fft_magnitudes = np.abs(fft_result)  # 计算幅值
+        #
+        # # 仅考虑前半部分（正频率），排除 DC 分量（0 频率）
+        # half_L = context_len // 2
+        # fft_magnitudes[0] = 0  # 忽略 DC 分量（整体均值）
+        #
+        # # 找到幅值最大的频率索引
+        # peak_index = np.argmax(fft_magnitudes[:half_L])
+        #
+        # # 计算对应的周期
+        # period = context_len // peak_index if peak_index != 0 else context_len  # 避免除以 0
+
+        # # Iterate through each feature separately
+        # for i in range(feat):
+        #     # Compute FFT on the context to find the dominant period
+        #     fft_vals = np.fft.fft(context[i])
+        #     freqs = np.fft.fftfreq(context_len)
+        #
+        #     # Discard the freq=0 component by starting from index 1
+        #     fft_vals = fft_vals[1:]
+        #     freqs = freqs[1:]
+        #
+        #     # Identify the period by finding the frequency with the highest power
+        #     dominant_freq = freqs[np.argmax(np.abs(fft_vals))]
+        #
+        #     # Compute the period length from the dominant frequency
+        #     period = int(np.abs(1 / dominant_freq))
+        #
+        #     # ToDo: For now, we only consider the case that context is longer than prediction
+        #     # If no periodicity in context, use the last time points for forecasting.
+        #     if period == context_len:
+        #         pass
+        #     else:
+        #         # Interpolate history and horizon
+        #         context = numpy_interpolate(context, period, patch_size)
+        #         prediction = numpy_interpolate(prediction, period, patch_size)
+
+        # # data_entry[self.naive_prediction_field] =
+
+        return data_entry

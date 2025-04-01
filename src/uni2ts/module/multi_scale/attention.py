@@ -382,59 +382,204 @@ class GroupedQueryAttention(nn.Module):
         )
 
         # RoPE
-        query, key = self._qk_proj(
-            query,
-            key,
-            query_var_id=query_var_id,
-            kv_var_id=kv_var_id,
-            query_time_id=query_time_id,
-            kv_time_id=kv_time_id,
-        )
+        # query, key = self._qk_proj(  # (bs group hpg len dim)
+        #     query,
+        #     key,
+        #     query_var_id=query_var_id,
+        #     kv_var_id=kv_var_id,
+        #     query_time_id=query_time_id,
+        #     kv_time_id=kv_time_id,
+        # )
 
-        out = F.scaled_dot_product_attention(
+
+        # # ToDo: To plot attn_map:
+        # attn_map = get_attn_map(
+        #     query,
+        #     key,
+        #     attn_mask=attn_mask,
+        #     dropout_p=self.attn_dropout_p,
+        #     scale=self.softmax_scale,
+        # )
+
+        # out = F.scaled_dot_product_attention(
+        #     query,
+        #     key,
+        #     value,
+        #     attn_mask=attn_mask,
+        #     dropout_p=self.attn_dropout_p,
+        #     scale=self.softmax_scale,
+        # )
+        # out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
+        # return self.out_proj(out)
+
+        # ToDO: Zipper Time ID
+        out = self.attention_with_zipper_time_id_adjustment(
             query,
             key,
             value,
-            attn_mask=attn_mask,
-            dropout_p=self.attn_dropout_p,
-            scale=self.softmax_scale,
+            query_time_id,
+            kv_time_id,
+            attn_mask,
+            index_by_variate
         )
         out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
         return self.out_proj(out)
 
 
-    #     # For query of each scale, map the all the kv_time_id to the same scale.
-    #     out = torch.zeros_like(query)
-    #     for i in range(self.num_new_scales+1):
-    #         index = index_by_variate[i]
-    #         query_i = query[..., :, :, index, :]               # ... group hpg q_len dim
-    #         query_i_time_id = query_time_id[..., :, :, index]  # "*batch #group #hpg q_len"
-    #         attn_mask_i = attn_mask[..., :, :, index, :]
-    #
-    #         mapped_kv_time_id = self.time_id_mapping(kv_time_id, index_by_variate, target_scale=i)
-    #
-    #         query_i, key = self._qk_proj(
-    #             query_i,
-    #             key,
-    #             query_var_id=query_var_id,
-    #             kv_var_id=kv_var_id,
-    #             query_time_id=query_i_time_id,
-    #             kv_time_id=mapped_kv_time_id,
-    #         )
-    #
-    #         out_i = F.scaled_dot_product_attention(
-    #             query_i,
-    #             key,
-    #             value,
-    #             attn_mask=attn_mask_i,
-    #             dropout_p=self.attn_dropout_p,
-    #             scale=self.softmax_scale,
-    #         )
-    #
-    #         out[..., :, :, index, :] = out_i
-    #     out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
-    #     return self.out_proj(out)
-    #
+    def attention_with_zipper_time_id_adjustment(
+            self,
+            query,  # (bs group hpg len dim)
+            key,    # (bs group hpg len dim)
+            value,
+            query_time_id,
+            kv_time_id,
+            attn_mask,
+            index_by_variate
+            ):
+
+        L, S = query.size(-2), key.size(-2)
+        scale_factor = 1 / math.sqrt(query.size(-1)) if self.softmax_scale is None else self.softmax_scale
+        attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
+
+        # 创建1个形状为attn_weight的空Tensor，用来之后向内部填充不同scale之间的attn_weights?
+        attn_weight = torch.empty(
+            (*query.shape[:-2], query.shape[-2], key.shape[-2]),  # (..., L, S)
+            dtype=query.dtype,
+            device=query.device
+        )
+
+        for i in range(self.num_new_scales + 1):
+            for j in range(self.num_new_scales + 1):
+                index_q = index_by_variate[i]
+                index_k = index_by_variate[j]
+
+                query_i = query[..., :, :, index_q, :]
+                key_j = key[..., :, :, index_k, :]
+
+                query_i_time_id = query_time_id[..., :, :, index_q]
+                key_j_time_id = kv_time_id[..., :, :, index_k]
+
+                if i == j:
+                    pass
+                elif i > j:
+                    key_j_time_id = self.expand_time_id(short_time_id=query_i_time_id, long_time_id=key_j_time_id, repeat_factor=2**(i-j))
+                else:
+                    query_i_time_id = self.expand_time_id(short_time_id=key_j_time_id, long_time_id=query_i_time_id, repeat_factor=2**(j-i))
+
+                # RoPE with adjusted time ID
+                query_i, key_j = self._qk_proj(
+                    query_i,
+                    key_j,
+                    query_var_id=None,
+                    kv_var_id=None,
+                    query_time_id=query_i_time_id,
+                    kv_time_id=key_j_time_id,
+                )
+
+                attn_weight_ij = query_i @ key_j.transpose(-2, -1) * scale_factor
+                # meshgrid for 2D indexing
+                iq, ik = torch.meshgrid(index_q, index_k, indexing='ij')
+                attn_weight[..., iq, ik] = attn_weight_ij  # 正确写入
+
+        if attn_mask is not None:
+            if attn_mask.dtype == torch.bool:
+                attn_bias.masked_fill_(attn_mask.logical_not(), float("-inf"))
+            else:
+                attn_bias = attn_mask + attn_bias
+
+        attn_weight += attn_bias
+        attn_weight = torch.softmax(attn_weight, dim=-1)
+        attn_weight = torch.dropout(attn_weight, self.attn_dropout_p, train=True)
+
+        # # Step 1: 去掉多余的维度
+        # attn_map = attn_weight.squeeze(2)  # 形状变为 (bs, head, 34, 34)
+        #
+        # # Step 2: 对 head 维度求平均
+        # attn_map_avg = attn_map.mean(dim=1)  # 形状变为 (bs, 34, 34)
+        #
+        # bs_index = 0  # 选择第一个 batch
+        # attention_to_plot = attn_map_avg[bs_index].detach().cpu().numpy()
+        #
+        # import matplotlib.pyplot as plt
+        # import matplotlib.ticker as ticker
+        #
+        # # 可视化
+        # plt.figure(figsize=(8, 6))
+        # plt.imshow(attention_to_plot, cmap="viridis", aspect="auto")
+        # cbar = plt.colorbar(label="Attention Score")
+        # cbar.ax.set_ylabel("Attention Score", fontsize=20)  # 设置 label 和字体大小
+        # cbar.ax.tick_params(labelsize=10)  # 设置 colorbar 刻度字体大小
+        # cbar.formatter = ticker.FormatStrFormatter("%.2f")  # 设置小数点后 2 位
+        # cbar.update_ticks()  # 更新刻度格式
+        # # Modify the x-axis tick font size
+        # plt.xticks(fontsize=15)
+        # plt.yticks(fontsize=15)
+        # plt.tight_layout()
+        # plt.show()
+
+
+        return attn_weight @ value
+
+
+
+    def expand_time_id(self, short_time_id: torch.Tensor, long_time_id: torch.Tensor, repeat_factor: int):
+        """
+        Expand short_time_id to match long_time_id along the last dimension.
+        Each time ID is repeated proportionally to the length ratio.
+
+        Args:
+            short_time_id: Tensor of shape (bs, group, head, len1)
+            long_time_id: Tensor of shape (bs, group, head, len2)
+
+        Returns:
+            expanded_time_id: Tensor of shape (bs, group, head, len2)
+        """
+        len1 = short_time_id.shape[-1]
+        len2 = long_time_id.shape[-1]
+        remainder = len2 % len1
+
+        # Repeat each time_id value repeat_factor times
+        repeated = short_time_id.unsqueeze(-1).repeat(1, 1, 1, 1, repeat_factor)  # (bs, group, head, len1, repeat_factor)
+        repeated = repeated.reshape(*short_time_id.shape[:-1], -1)  # (bs, group, head, len1 * repeat_factor)
+
+        # If len2 is not divisible by len1, pad extra elements using the last few short_time_ids
+        if repeated.shape[-1] > len2:
+            repeated = repeated[:, :, :, :len2]
+
+        return repeated
+
+        # # For query of each scale, map the all the kv_time_id to the same scale.
+        # out = torch.zeros_like(query)
+        # for i in range(self.num_new_scales+1):
+        #     index = index_by_variate[i]
+        #     query_i = query[..., :, :, index, :]               # ... group hpg q_len dim
+        #     query_i_time_id = query_time_id[..., :, :, index]  # "*batch #group #hpg q_len"
+        #     attn_mask_i = attn_mask[..., :, :, index, :]
+        #
+        #     mapped_kv_time_id = self.time_id_mapping(kv_time_id, index_by_variate, target_scale=i)
+        #
+        #     query_i, key = self._qk_proj(
+        #         query_i,
+        #         key,
+        #         query_var_id=query_var_id,
+        #         kv_var_id=kv_var_id,
+        #         query_time_id=query_i_time_id,
+        #         kv_time_id=mapped_kv_time_id,
+        #     )
+        #
+        #     out_i = F.scaled_dot_product_attention(
+        #         query_i,
+        #         key,
+        #         value,
+        #         attn_mask=attn_mask_i,
+        #         dropout_p=self.attn_dropout_p,
+        #         scale=self.softmax_scale,
+        #     )
+        #
+        #     out[..., :, :, index, :] = out_i
+        # out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
+        # return self.out_proj(out)
+
     # def time_id_mapping(self, time_id,  index_by_variate, target_scale, factor=2):
     #     """
     #     Map time_id to target_scale
@@ -510,3 +655,44 @@ class MultiHeadAttention(GroupedQueryAttention):
             var_qk_proj=var_qk_proj,
             time_qk_proj=time_qk_proj,
         )
+
+
+def get_attn_map(query, key, attn_mask=None, dropout_p=0.0, scale=None) -> torch.Tensor:
+
+    scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+    attn_bias = attn_mask
+
+
+    attn_weight = query @ key.transpose(-2, -1) * scale_factor
+    attn_weight += attn_bias
+    attn_weight = torch.softmax(attn_weight, dim=-1)
+    attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
+
+    # Step 1: 去掉多余的维度
+    attn_map = attn_weight.squeeze(2)  # 形状变为 (bs, head, 34, 34)
+
+    # Step 2: 对 head 维度求平均
+    attn_map_avg = attn_map.mean(dim=1)  # 形状变为 (bs, 34, 34)
+
+    bs_index = 0  # 选择第一个 batch
+    attention_to_plot = attn_map_avg[bs_index].detach().cpu().numpy()
+
+    import matplotlib.pyplot as plt
+    import matplotlib.ticker as ticker
+
+    # 可视化
+    plt.figure(figsize=(8, 6))
+    plt.imshow(attention_to_plot, cmap="viridis", aspect="auto")
+    cbar = plt.colorbar(label="Attention Score")
+    cbar.ax.set_ylabel("Attention Score", fontsize=20)  # 设置 label 和字体大小
+    cbar.ax.tick_params(labelsize=10)  # 设置 colorbar 刻度字体大小
+    cbar.formatter = ticker.FormatStrFormatter("%.2f")  # 设置小数点后 2 位
+    cbar.update_ticks()  # 更新刻度格式
+    # Modify the x-axis tick font size
+    plt.xticks(fontsize=15)
+    plt.yticks(fontsize=15)
+    plt.tight_layout()
+    plt.show()
+
+
+    return attn_weight

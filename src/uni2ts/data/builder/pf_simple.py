@@ -395,7 +395,7 @@ def generate_finetune_builder(
 ) -> SimpleFinetuneDatasetBuilder:
 
     if dataset == 'electricity':
-        distance = 20
+        distance = 10
         return SimpleFinetuneDatasetBuilder(
             dataset=dataset,
             windows=(train_length - context_length - prediction_length) // distance + 1,

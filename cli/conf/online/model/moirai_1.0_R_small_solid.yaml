@@ -41,3 +41,5 @@ context_length: null
 prediction_length: null
 finetune_pattern: full
 dataset_name: null
+zero_shot: false
+warmup_checkpoint: null

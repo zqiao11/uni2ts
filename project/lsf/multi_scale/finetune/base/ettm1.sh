@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=1;
+export HYDRA_FULL_ERROR=1; export CUDA_VISIBLE_DEVICES=0;
 
 model=moirai_1.0_R_base
 cp=conf/lsf/multi_scale/finetune
@@ -33,6 +33,8 @@ for pl in 96 192 336 720; do
   val_data.prediction_length=$pl \
   val_data.mode=${mode} \
   model.lr=1e-7 \
-  model.scale_weight_lr=1e-2 \
-  train_dataloader.batch_size=128
+  model.scale_weight_lr=1e-5 \
+  train_dataloader.batch_size=128 \
+  trainer.callbacks.'2'.patience=1 \
+  model.prior_scale=0
 done

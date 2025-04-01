@@ -39,6 +39,6 @@ for pl in 24 48 96; do
 done
 
 
-# Prediction Length: 24, Patch Size: 64, Lr: 1e-05
+# Prediction Length: 24, Patch Size: 64, Lr: 5e-05  Leads to very bad online results
 # Prediction Length: 48, Patch Size: 64, Lr: 1e-05
-# Prediction Length: 96, Patch Size: 64, Lr: 1e-05
+# Prediction Length: 96, Patch Size: 64, Lr: 5e-04  Leads to very bad online results

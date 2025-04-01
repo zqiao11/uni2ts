@@ -12,7 +12,6 @@ seed: 0
 tf32: true
 compile: false
 ckpt_path: null
-save_checkpoint: true  # 默认保存
 trainer:
   _target_: lightning.Trainer
   accelerator: auto
@@ -20,15 +19,12 @@ trainer:
   devices: auto
   num_nodes: 1
   precision: 32
+  enable_checkpointing: false  # Do not save any ckpt for online learning
   logger:
       _target_: lightning.pytorch.loggers.TensorBoardLogger
       save_dir: ${hydra:runtime.output_dir}
       name: logs
   callbacks:
-#    - _target_: lightning.pytorch.callbacks.ModelCheckpoint
-#      dirpath: ${hydra:runtime.output_dir}/checkpoints
-#      save_weights_only: true
-#      every_n_epochs: 1
     - _target_: lightning.pytorch.callbacks.TQDMProgressBar
       refresh_rate: 100
   max_epochs: 1

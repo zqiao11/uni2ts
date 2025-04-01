@@ -6,23 +6,23 @@ set +a
 ds_type="wide"  # "wide_multivariate"
 path_prefix=$LSF_PATH
 
-#for data in ETTh1 ETTh2; do
-#  python -m uni2ts.data.builder.online \
-#    $data \
-#    "${path_prefix}/ETT-small/${data}.csv" \
-#    --dataset_type $ds_type\
-#    --offset 14400 \
-#    --normalize
-#done
+for data in ETTh1 ETTh2; do
+  python -m uni2ts.data.builder.online \
+    $data \
+    "${path_prefix}/ETT-small/${data}.csv" \
+    --dataset_type $ds_type\
+    --offset 14400 \
+    --normalize
+done
 
-#for data in ETTm1 ETTm2; do
-#  python -m uni2ts.data.builder.online \
-#    $data \
-#    "${path_prefix}/ETT-small/${data}.csv" \
-#    --dataset_type $ds_type\
-#    --offset 57600 \
-#    --normalize
-#done
+for data in ETTm1 ETTm2; do
+  python -m uni2ts.data.builder.online \
+    $data \
+    "${path_prefix}/ETT-small/${data}.csv" \
+    --dataset_type $ds_type\
+    --offset 57600 \
+    --normalize
+done
 
 python -m uni2ts.data.builder.online \
   weather \

@@ -437,6 +437,44 @@ class SimpleEvalDatasetBuilder(DatasetBuilder):
         )
 
 
+@dataclass
+class OnlineValDatasetBuilder(SimpleEvalDatasetBuilder):
+    def build_dataset(
+            self,
+            file: Path,
+            dataset_type: str,
+            offset: int = None,
+            freq: str = "H",
+            mean: pd.Series = None,
+            std: pd.Series = None,
+    ):
+        assert offset is not None, "Offset must be provided to build the online val dataset"
+
+        df = pd.read_csv(file, index_col=0, parse_dates=True)
+
+        if mean is not None and std is not None:
+            df = (df - mean) / (std + 1e-10)
+
+        if dataset_type == "wide":
+            _from_dataframe = _from_wide_dataframe
+        elif dataset_type == "wide_multivariate":
+            _from_dataframe = _from_wide_dataframe_multivariate
+        else:
+            raise ValueError(
+                f"Unrecognized dataset_type, {dataset_type}."
+                " Valid options are 'long', 'wide', and 'wide_multivariate'."
+            )
+
+        example_gen_func, features = _from_dataframe(
+            df, freq=freq, offset=offset,
+        )
+        hf_dataset = datasets.Dataset.from_generator(
+            example_gen_func, features=features
+        )
+        hf_dataset.info.dataset_name = self.dataset
+        hf_dataset.save_to_disk(self.storage_path / 'lsf' / f'{dataset_type}' / self.dataset)
+
+
 def generate_finetune_builder(
     dataset: str,
     train_length: int,
@@ -449,30 +487,42 @@ def generate_finetune_builder(
     """
     Set distance=1 for training data. Same as standard LSF setting.
     """
-    if dataset == 'electricity':
-        distance = 25
-        return SimpleFinetuneDatasetBuilder(
-            dataset=dataset,
-            windows=(train_length - context_length - prediction_length) // distance + 1,
-            distance=distance,
-            prediction_length=prediction_length,
-            context_length=context_length,
-            patch_size=patch_size,
-            mode=mode,
-            storage_path=storage_path,
-        )
 
-    else:
-        return SimpleFinetuneDatasetBuilder(
-            dataset=dataset,
-            windows=train_length - context_length - prediction_length + 1,
-            distance=1,
-            prediction_length=prediction_length,
-            context_length=context_length,
-            patch_size=patch_size,
-            mode=mode,
-            storage_path=storage_path,
-        )
+    return SimpleFinetuneDatasetBuilder(
+        dataset=dataset,
+        windows=train_length - context_length - prediction_length + 1,
+        distance=1,
+        prediction_length=prediction_length,
+        context_length=context_length,
+        patch_size=patch_size,
+        mode=mode,
+        storage_path=storage_path,
+    )
+
+    # if dataset == 'electricity':
+    #     distance = 25
+    #     return SimpleFinetuneDatasetBuilder(
+    #         dataset=dataset,
+    #         windows=(train_length - context_length - prediction_length) // distance + 1,
+    #         distance=distance,
+    #         prediction_length=prediction_length,
+    #         context_length=context_length,
+    #         patch_size=patch_size,
+    #         mode=mode,
+    #         storage_path=storage_path,
+    #     )
+    #
+    # else:
+    #     return SimpleFinetuneDatasetBuilder(
+    #         dataset=dataset,
+    #         windows=train_length - context_length - prediction_length + 1,
+    #         distance=1,
+    #         prediction_length=prediction_length,
+    #         context_length=context_length,
+    #         patch_size=patch_size,
+    #         mode=mode,
+    #         storage_path=storage_path,
+    #     )
 
 
 def generate_eval_builder(
@@ -499,8 +549,8 @@ def generate_eval_builder(
     # }
 
     distances = {
-        "ETTh1_eval": 1,  # 13h
-        "ETTh2_eval": 1,
+        "ETTh1_eval": 7,  # 7h
+        "ETTh2_eval": 7,
         "ETTm1_eval": 25,  # 6h 15min
         "ETTm2_eval": 25,
         "weather_eval": 37,  # 6h 10 min

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=1
+export CUDA_VISIBLE_DEVICES=0
 
 cp=conf/pf/multi_scale/eval
 cl=2000
@@ -9,7 +9,7 @@ pl=24
 model=moirai_lightning_ckpt
 
 
-cpp='./outputs/pf/pf/finetune/moirai_1.0_R_small/pf/full/solar-energy/cl2000_pl24/checkpoints/epoch_51-step_91104.ckpt'
+cpp='./outputs/pf/multi_scale/finetune/moirai_1.0_R_small/solar_small_k1/freeze_ffn/solar-energy/cl2000_pl24/checkpoints/epoch_7-step_14016.ckpt'
 
 
 pretrained_model=$(echo $cpp | cut -d'/' -f6)

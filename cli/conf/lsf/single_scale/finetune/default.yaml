@@ -48,7 +48,7 @@ trainer:
   gradient_clip_algorithm: norm
 train_dataloader:
   _target_: uni2ts.data.loader.DataLoader
-  batch_size: 1024 # Can use a large batch size after disabling sequence packing.
+  batch_size: 256 # Can use a large batch size after disabling sequence packing.
   batch_size_factor: 2.0
   cycle: false  # Set it as false to loop over all batches per epoch
   num_batches_per_epoch: null

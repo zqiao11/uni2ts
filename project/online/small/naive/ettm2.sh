@@ -12,7 +12,7 @@ mode=S
 ft_pattern=full
 batch_size=7
 max_epochs=1
-zero_shot=True
+zero_shot=False
 
 # 定义参数组合
 declare -a experiments=(
