@@ -49,7 +49,17 @@ def main(cfg: DictConfig):
         if "pretrained_checkpoint_path" in cfg.model:
             checkpoint = torch.load(cfg.model.checkpoint_path)
             hyper_params = checkpoint['hyper_parameters']
-            lora_target_modules = hyper_params['lora_kwargs']['target_modules']
+
+            lora_flag = False
+            if 'lora_kwargs' in hyper_params:
+                if hyper_params['use_lora']:
+                    lora_flag = True
+                    lora_target_modules = hyper_params['lora_kwargs']['target_modules']
+
+            if 'adalora_kwargs' in hyper_params:
+                if hyper_params['use_adalora']:
+                    lora_flag = True
+                    lora_target_modules = hyper_params['adalora_kwargs']['target_modules']
 
             tuned_state_dict = checkpoint["state_dict"]
             pretrained_moirai_state_dict = torch.load(
@@ -58,18 +68,17 @@ def main(cfg: DictConfig):
 
             new_state_dict = {}
             for name, tensor in pretrained_moirai_state_dict.items():
-                new_name = "module." + name
 
-                # # If using Lora, need to rename the pretrained weights before loading.
-                # if hyper_params['use_lora'] or hyper_params['use_adalora']:
-                #     new_name = 'module.model.' + name
-                #     # In LoraModel, Lora's target_modules will be added a suffix '.base_layer'.
-                #     for module in lora_target_modules:
-                #         if module in new_name:
-                #             new_name = new_name.replace(module, module + '.base_layer')
-                #             break
-                # else:
-                #     new_name = "module." + name
+                # If using Lora, need to rename the pretrained weights before loading.
+                if lora_flag:
+                    new_name = 'module.model.' + name
+                    # In LoraModel, Lora's target_modules will be added a suffix '.base_layer'.
+                    for module in lora_target_modules:
+                        if module in new_name:
+                            new_name = new_name.replace(module, module + '.base_layer')
+                            break
+                else:
+                    new_name = "module." + name
                 new_state_dict[new_name] = tensor
             pretrained_moirai_state_dict = new_state_dict
 

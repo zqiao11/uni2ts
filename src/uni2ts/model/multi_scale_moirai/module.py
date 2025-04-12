@@ -138,7 +138,7 @@ class MoiraiModule(
         self.distr_output = distr_output
         self.param_proj = self.distr_output.get_param_proj(d_model, patch_sizes)
 
-        self.in_proj_adaptors = nn.ParameterList()
+        # self.in_proj_adaptors = nn.ParameterList()
 
     def forward(
         self,
@@ -204,6 +204,7 @@ class MoiraiModule(
     def post_init(self, token_idx_per_scale):
         self.token_idx_per_scale = token_idx_per_scale
         self.num_scales = len(token_idx_per_scale)
+        self.in_proj_adaptors = nn.ParameterList()
 
         # 每个scale一个FC layer做input proj的adaptation
         for scale in range(0, self.num_scales):

@@ -159,23 +159,14 @@ class MoiraiFinetune(L.LightningModule):
             if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
                 # Call post_init() method of the GroupedQueryAttention object
                 layer.self_attn.init_multi_scale_modules(self.num_new_scales, self.r, self.alpha)
+                layer.self_attn.init_x_scale_aggregator(
+                    self.num_new_scales,
+                    self.token_idx_per_scale,
+                    self._get_num_pred_tokens_per_scale(),
+                    self.ds_factor,
+                    shared_by_dim=True
+                    )
 
-        # Post init BinaryAttentionBias
-        # for module in self.module.encoder.modules():
-        #     if isinstance(module, BinaryAttentionBias):
-        #         module.post_init(self.num_new_scales+1)
-
-        # ToDo: for time id
-        for module in self.module.encoder.modules():
-            if isinstance(module, MultiScaleRotaryProjection):
-                module.post_init(self.token_idx_per_scale)
-
-        # self.scale_weight_fc = nn.Linear(
-        #     in_features=self.module.d_model * (self.num_new_scales+1),
-        #     out_features=self.num_new_scales+1
-        # )
-        # nn.init.zeros_(self.scale_weight_fc.weight)  # 初始化权重为0
-        # nn.init.zeros_(self.scale_weight_fc.bias)  # 初始化偏置为0
 
     def _get_token_idx_per_scale(self):
         base_token_len = math.ceil(self.context_length / self.patch_size) + math.ceil(self.prediction_length / self.patch_size)
@@ -636,6 +627,9 @@ class MoiraiFinetune(L.LightningModule):
                 elif 'v_A' in pn or 'v_B' in pn:
                     decay.add(fpn)
                 elif 'scale_weight' in pn:
+                    decay.add(fpn)
+
+                elif 'c2f_aggregator' in pn or 'f2c_aggregator' in pn:
                     decay.add(fpn)
 
                 # elif 'layers.0.self_attn.time_qk_proj.query_proj.pe_weights' in pn:  # Shared time_qk_proj

@@ -16,7 +16,7 @@
 import math
 from collections.abc import Callable
 from functools import partial
-from typing import Optional
+from typing import Optional, List
 
 import torch
 import torch.nn.functional as F
@@ -53,6 +53,251 @@ def native_scaled_dot_product_attention(
     attn_weight = torch.softmax(attn_weight, dim=-1)
     attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
     return attn_weight @ value
+
+
+class FilmMapping(nn.Module):
+    def __init__(
+            self,
+            dim: int,
+            shared_by_dim: bool = True
+    ):
+        super().__init__()
+        self.dim = dim
+        self.gamma = nn.Parameter(torch.zeros(1)) if shared_by_dim else nn.Parameter(torch.zeros(dim))
+        self.beta = nn.Parameter(torch.zeros(1)) if shared_by_dim else nn.Parameter(torch.zeros(dim))
+
+    def forward(self, tokens):
+        """
+        tokens: (*bs, seq_len, dim);
+        """
+        return tokens * self.gamma + self.beta
+
+
+class Coarse2FineAggregator(nn.Module):
+    def __init__(
+            self,
+            dim: int,
+            num_new_scales: int,
+            token_idx_per_scale: List[List],
+            num_pred_token_per_scale: List[int],
+            ds_factor: int = 2,
+            shared_by_dim: bool = True,
+    ):
+        super().__init__()
+        self.dim = dim
+        self.num_new_scales = num_new_scales
+        self.token_idx_per_scale = token_idx_per_scale
+
+        for i, idx_list in enumerate(token_idx_per_scale):
+            idx_tensor = torch.tensor(idx_list, dtype=torch.long)
+            self.register_buffer(f"token_idx_scale_{i}", idx_tensor, persistent=False)
+
+        self.num_pred_token_per_scale = num_pred_token_per_scale
+        self.ds_factor = ds_factor
+
+        self.xscale_mapping = nn.ParameterList()
+        for _ in range(self.num_new_scales):
+            self.xscale_mapping.append(
+                FilmMapping(
+                    dim=dim,
+                    shared_by_dim=shared_by_dim
+                )
+            )
+
+    def _aggregate_xscale_tokens(self, coarse_tokens, fine_tokens, coarse_scale):
+        """
+        coarse_tokens: (*bs, len_i, dim);
+        fine_tokens: (*bs, len_j, dim);
+        coarse_scale: int; scale id of the coarse scale
+        """
+
+        fine_scale = coarse_scale - 1
+
+        coarse_pred_num = self.num_pred_token_per_scale[coarse_scale]
+        coarse_ctx_num = len(self.token_idx_per_scale[coarse_scale]) - coarse_pred_num
+        coarse_pred_tokens = coarse_tokens[..., -coarse_pred_num:, :]
+        coarse_ctx_tokens = coarse_tokens[..., : coarse_ctx_num, :]
+
+        fine_pred_num = self.num_pred_token_per_scale[fine_scale]
+        fine_ctx_num = len(self.token_idx_per_scale[fine_scale]) - fine_pred_num
+        fine_pred_tokens = fine_tokens[..., -fine_pred_num:, :]
+        fine_ctx_tokens = fine_tokens[..., : fine_ctx_num, :]
+
+        if fine_pred_num == self.ds_factor * coarse_pred_num:
+            expanded_pred_tokens = coarse_pred_tokens.repeat_interleave(self.ds_factor, dim=-2)
+            fused_pred_tokens = fine_pred_tokens + expanded_pred_tokens
+
+        elif fine_pred_num // self.ds_factor + 1 == coarse_pred_num:
+            if fine_pred_num == coarse_pred_num == 1:
+                fused_pred_tokens = coarse_pred_tokens + fine_pred_tokens  # ToDo: 这里可能影响原始tensor上切片位置上的值...
+            else:
+                main_fine_pred_tokens = fine_pred_tokens[..., :-1, :]
+                last_fine_pred_token = fine_pred_tokens[..., -1:, :]
+                main_expanded_pred_tokens = coarse_pred_tokens[..., :-1, :].repeat_interleave(self.ds_factor, dim=-2)
+                main_fused_pred_tokens = main_fine_pred_tokens + main_expanded_pred_tokens
+                last_fused_fine_pred_token = coarse_pred_tokens[..., -1:, :] + last_fine_pred_token
+                fused_pred_tokens = torch.cat([main_fused_pred_tokens, last_fused_fine_pred_token], dim=-2)
+        else:
+            raise ValueError("Unexpected PRED lengths between two consecutive scales")
+
+        if fine_ctx_num == self.ds_factor * coarse_ctx_num:
+            expanded_ctx_tokens = coarse_ctx_tokens.repeat_interleave(self.ds_factor, dim=-2)
+            fused_ctx_tokens = fine_ctx_tokens + expanded_ctx_tokens
+        elif fine_ctx_num // self.ds_factor + 1 == coarse_ctx_num:
+            main_fine_ctx_tokens = fine_ctx_tokens[..., 1:, :]
+            first_fine_ctx_token = fine_ctx_tokens[..., :1, :]
+            main_expanded_ctx_tokens = coarse_ctx_tokens[..., 1:, :].repeat_interleave(self.ds_factor, dim=-2)
+            main_fused_ctx_tokens = main_fine_ctx_tokens + main_expanded_ctx_tokens
+            first_fused_fine_ctx_token = coarse_ctx_tokens[..., :1, :] + first_fine_ctx_token
+            fused_ctx_tokens = torch.cat([first_fused_fine_ctx_token, main_fused_ctx_tokens], dim=-2)
+        else:
+            raise ValueError("Unexpected CTX lengths between two consecutive scales")
+
+        fused_tokens = torch.cat([fused_ctx_tokens, fused_pred_tokens], dim=-2)
+
+        return fused_tokens
+
+    def forward(self, multiscale_tokens):
+        """
+        multiscale_tokens: (*bs, seq_len, dim);
+        """
+
+        for i in range(self.num_new_scales, 0, -1):
+            # coarse_idx = self.token_idx_per_scale[i]
+            # fine_idx = self.token_idx_per_scale[i-1]
+            # coarse_tokens = multiscale_tokens[..., coarse_idx, :]
+            # fine_tokens = multiscale_tokens[..., fine_idx, :]
+            coarse_idx = getattr(self, f"token_idx_scale_{i}")
+            fine_idx = getattr(self, f"token_idx_scale_{i - 1}")
+            coarse_tokens = torch.index_select(multiscale_tokens, -2, coarse_idx)
+            fine_tokens = torch.index_select(multiscale_tokens, -2, fine_idx)
+            mapped_tokens = self.xscale_mapping[i - 1](coarse_tokens)  # (*bs, len_i, dim)
+            multiscale_tokens[..., fine_idx, :] = self._aggregate_xscale_tokens(mapped_tokens, fine_tokens, i)
+
+        return multiscale_tokens
+
+
+class Fine2CoarseAggregator(nn.Module):
+    def __init__(
+            self,
+            dim: int,
+            num_new_scales: int,
+            token_idx_per_scale: List[List],
+            num_pred_token_per_scale: List[int],
+            ds_factor: int = 2,
+            shared_by_dim: bool = True,
+    ):
+        super().__init__()
+        self.dim = dim
+        self.num_new_scales = num_new_scales
+        self.token_idx_per_scale = token_idx_per_scale
+
+        for i, idx_list in enumerate(token_idx_per_scale):
+            idx_tensor = torch.tensor(idx_list, dtype=torch.long)
+            self.register_buffer(f"token_idx_scale_{i}", idx_tensor, persistent=False)
+
+        self.num_pred_token_per_scale = num_pred_token_per_scale
+        self.ds_factor = ds_factor
+
+        self.xscale_mapping = nn.ParameterList()
+        for _ in range(self.num_new_scales):
+            self.xscale_mapping.append(
+                FilmMapping(
+                    dim=dim,
+                    shared_by_dim=shared_by_dim
+                )
+            )
+
+    def _aggregate_xscale_tokens(self,  fine_tokens, coarse_tokens, fine_scale):
+        """
+        coarse_tokens: (*bs, len_i, dim);
+        fine_tokens: (*bs, len_j, dim);
+        coarse_scale: int; scale id of the coarse scale
+        """
+
+        coarse_scale = fine_scale + 1
+
+        coarse_pred_num = self.num_pred_token_per_scale[coarse_scale]
+        coarse_ctx_num = len(self.token_idx_per_scale[coarse_scale]) - coarse_pred_num
+        coarse_pred_tokens = coarse_tokens[..., -coarse_pred_num:, :]
+        coarse_ctx_tokens = coarse_tokens[..., : coarse_ctx_num, :]
+
+        fine_pred_num = self.num_pred_token_per_scale[fine_scale]
+        fine_ctx_num = len(self.token_idx_per_scale[fine_scale]) - fine_pred_num
+        fine_pred_tokens = fine_tokens[..., -fine_pred_num:, :]
+        fine_ctx_tokens = fine_tokens[..., : fine_ctx_num, :]
+
+        if fine_pred_num == self.ds_factor * coarse_pred_num:
+            avg_pred_tokens = self._downsample_mean(fine_pred_tokens)
+            fused_pred_tokens = coarse_pred_tokens + avg_pred_tokens
+
+        elif fine_pred_num // self.ds_factor + 1 == coarse_pred_num:
+            if fine_pred_num == coarse_pred_num == 1:
+                fused_pred_tokens = coarse_pred_tokens + fine_pred_tokens  # ToDo: 这里可能影响原始tensor上切片位置上的值...
+            else:
+                main_fine_pred_tokens = fine_pred_tokens[..., :-1, :]
+                last_fine_pred_token = fine_pred_tokens[..., -1:, :]
+                main_avg_pred_tokens = self._downsample_mean(main_fine_pred_tokens)
+                main_fused_pred_tokens = coarse_pred_tokens[..., :-1, :] + main_avg_pred_tokens
+                last_fused_fine_pred_token = coarse_pred_tokens[..., -1:, :] + last_fine_pred_token
+                fused_pred_tokens = torch.cat([main_fused_pred_tokens, last_fused_fine_pred_token], dim=-2)
+        else:
+            raise ValueError("Unexpected PRED lengths between two consecutive scales")
+
+        if fine_ctx_num == self.ds_factor * coarse_ctx_num:
+            avg_ctx_tokens = self._downsample_mean(fine_ctx_tokens)
+            fused_ctx_tokens = coarse_ctx_tokens + avg_ctx_tokens
+        elif fine_ctx_num // self.ds_factor + 1 == coarse_ctx_num:
+            main_fine_ctx_tokens = fine_ctx_tokens[..., 1:, :]
+            first_fine_ctx_token = fine_ctx_tokens[..., :1, :]
+            main_avg_ctx_tokens = self._downsample_mean(main_fine_ctx_tokens)
+            main_fused_ctx_tokens = coarse_ctx_tokens[..., 1:, :] + main_avg_ctx_tokens
+            first_fused_fine_ctx_token = coarse_ctx_tokens[..., :1, :] + first_fine_ctx_token
+            fused_ctx_tokens = torch.cat([first_fused_fine_ctx_token, main_fused_ctx_tokens], dim=-2)
+        else:
+            raise ValueError("Unexpected CTX lengths between two consecutive scales")
+
+        fused_tokens = torch.cat([fused_ctx_tokens, fused_pred_tokens], dim=-2)
+
+        return fused_tokens
+
+    def _downsample_mean(self, fine_pred_tokens: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            fine_pred_tokens (Tensor): 输入形状为 (..., seq_len, dim)
+            ds_factor (int): downsample 的倍数
+
+        Returns:
+            Tensor: 输出形状为 (..., seq_len // ds_factor, dim)
+        """
+        ds_factor = self.ds_factor
+        *batch_dims, seq_len, dim = fine_pred_tokens.shape
+        assert seq_len % ds_factor == 0, f"seq_len={seq_len} must be dividable by ds_factor={ds_factor}"
+
+        fine_reshaped = fine_pred_tokens.reshape(*batch_dims, seq_len // ds_factor, ds_factor, dim)
+        avg_pred_tokens = fine_reshaped.mean(dim=-2)
+        return avg_pred_tokens
+
+    def forward(self, multiscale_tokens):
+        """
+        multiscale_tokens: (*bs, seq_len, dim);
+        """
+
+        for i in range(self.num_new_scales):
+            # coarse_idx = self.token_idx_per_scale[i+1]
+            # fine_idx = self.token_idx_per_scale[i]
+            #
+            # coarse_tokens = multiscale_tokens[..., coarse_idx, :]
+            # fine_tokens = multiscale_tokens[..., fine_idx , :]
+
+            coarse_idx = getattr(self, f"token_idx_scale_{i + 1}")
+            fine_idx = getattr(self, f"token_idx_scale_{i}")
+            coarse_tokens = torch.index_select(multiscale_tokens, -2, coarse_idx)
+            fine_tokens = torch.index_select(multiscale_tokens, -2, fine_idx)
+            mapped_tokens = self.xscale_mapping[i](fine_tokens)  # (*bs, len_i, dim)
+            multiscale_tokens[..., coarse_idx, :] = self._aggregate_xscale_tokens(mapped_tokens, coarse_tokens, i)
+
+        return multiscale_tokens
 
 
 class GroupedQueryAttention(nn.Module):
@@ -131,6 +376,26 @@ class GroupedQueryAttention(nn.Module):
             self.q_B.append(nn.Parameter(torch.zeros((self.dim, r), dtype=torch.float)))
             self.k_B.append(nn.Parameter(torch.zeros((self.dim, r), dtype=torch.float)))
             self.v_B.append(nn.Parameter(torch.zeros((self.dim, r), dtype=torch.float)))
+
+    def init_x_scale_aggregator(self, num_new_scales, token_idx_per_scale, num_pred_token_per_scale, ds_factor, shared_by_dim):
+
+        self.c2f_aggregator = Coarse2FineAggregator(
+            dim=self.dim,
+            num_new_scales=num_new_scales,
+            token_idx_per_scale=token_idx_per_scale,
+            num_pred_token_per_scale=num_pred_token_per_scale,
+            ds_factor=ds_factor,
+            shared_by_dim=shared_by_dim
+        )
+
+        self.f2c_aggregator = Fine2CoarseAggregator(
+            dim=self.dim,
+            num_new_scales=num_new_scales,
+            token_idx_per_scale=token_idx_per_scale,
+            num_pred_token_per_scale=num_pred_token_per_scale,
+            ds_factor=ds_factor,
+            shared_by_dim=shared_by_dim
+        )
 
     def _get_var_id(
         self,
@@ -312,17 +577,16 @@ class GroupedQueryAttention(nn.Module):
         kv_time_id: Optional[Int[torch.Tensor, "*batch kv_len"]] = None,
     ) -> Float[torch.Tensor, "*batch q_len dim"]:
 
-        # query = self.q_proj(query)
-        # key = self.k_proj(key)
-        # value = self.v_proj(value)
 
-        # ToDO: Apply lora for each scale
-        updated_query = query.clone()
-        updated_key = key.clone()
-        updated_value = value.clone()
+        index_by_variate = self.get_token_index_by_variate(query_var_id)
 
-        if self.num_new_scales is not None:
-            index_by_variate = self.get_token_index_by_variate(query_var_id)
+        if hasattr(self, "q_A"):
+            # ToDO: Apply lora for each scale
+            updated_query = query.clone()
+            updated_key = key.clone()
+            updated_value = value.clone()
+
+
             assert torch.equal(query_var_id, kv_var_id), "query_var_id is different from kv_var_id"
 
             for i in range(1 + self.num_new_scales):
@@ -335,9 +599,14 @@ class GroupedQueryAttention(nn.Module):
                 updated_key[..., index, :] = self.apply_lora(key_scale, self.k_proj, self.k_A[i], self.k_B[i])
                 updated_value[..., index, :] = self.apply_lora(value_scale, self.v_proj, self.v_A[i], self.v_B[i])
 
-        query = updated_query
-        key = updated_key
-        value = updated_value
+            query = updated_query
+            key = updated_key
+            value = updated_value
+        else:
+            query = self.q_proj(query)
+            key = self.k_proj(key)
+            value = self.v_proj(value)
+
 
         query = self.q_norm(
             rearrange(
@@ -381,15 +650,23 @@ class GroupedQueryAttention(nn.Module):
             kv_time_id=kv_time_id,
         )
 
-        # RoPE
-        # query, key = self._qk_proj(  # (bs group hpg len dim)
-        #     query,
-        #     key,
-        #     query_var_id=query_var_id,
-        #     kv_var_id=kv_var_id,
-        #     query_time_id=query_time_id,
-        #     kv_time_id=kv_time_id,
-        # )
+        # Apply Intra-scale mask for attention
+        intra_scale_mask = torch.full_like(attn_mask, float('-inf'))
+        for idx in index_by_variate:
+            # 使用 meshgrid 得到该 scale 内的 (i,j) 索引对
+            ii, jj = torch.meshgrid(idx, idx, indexing='ij')
+            intra_scale_mask[..., ii, jj] = attn_mask[..., ii, jj]
+        attn_mask = intra_scale_mask
+
+        # # RoPE; Need to comment if using Zipper TimeID
+        query, key = self._qk_proj(  # (bs group hpg len dim)
+            query,
+            key,
+            query_var_id=query_var_id,
+            kv_var_id=kv_var_id,
+            query_time_id=query_time_id,
+            kv_time_id=kv_time_id,
+        )
 
 
         # # ToDo: To plot attn_map:
@@ -401,29 +678,45 @@ class GroupedQueryAttention(nn.Module):
         #     scale=self.softmax_scale,
         # )
 
-        # out = F.scaled_dot_product_attention(
-        #     query,
-        #     key,
-        #     value,
-        #     attn_mask=attn_mask,
-        #     dropout_p=self.attn_dropout_p,
-        #     scale=self.softmax_scale,
-        # )
-        # out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
-        # return self.out_proj(out)
-
-        # ToDO: Zipper Time ID
-        out = self.attention_with_zipper_time_id_adjustment(
+        out = F.scaled_dot_product_attention(
             query,
             key,
             value,
-            query_time_id,
-            kv_time_id,
-            attn_mask,
-            index_by_variate
+            attn_mask=attn_mask,
+            dropout_p=self.attn_dropout_p,
+            scale=self.softmax_scale,
         )
         out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
-        return self.out_proj(out)
+
+        # # ToDO: Apply Aggre
+        if hasattr(self, "c2f_aggregator") and hasattr(self, "f2c_aggregator"):
+            out = self.out_proj(out)
+            out_c2f = self.c2f_aggregator(out)
+            out_f2c = self.f2c_aggregator(out)
+            out_x = (out_c2f + out_f2c) / 2
+
+            return out_x
+
+        # if hasattr(self, "c2f_aggregator"):
+        #     out = self.out_proj(out)
+        #     out_c2f = self.c2f_aggregator(out)
+        #     return out_c2f
+
+        else:
+            return self.out_proj(out)
+
+        # # ToDO: Zipper Time ID
+        # out = self.attention_with_zipper_time_id_adjustment(
+        #     query,
+        #     key,
+        #     value,
+        #     query_time_id,
+        #     kv_time_id,
+        #     attn_mask,
+        #     index_by_variate
+        # )
+        # out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
+        # return self.out_proj(out)
 
 
     def attention_with_zipper_time_id_adjustment(

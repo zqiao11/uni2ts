@@ -153,11 +153,14 @@ class MoiraiForecast(L.LightningModule):
             if hasattr(layer, 'self_attn') and isinstance(layer.self_attn, GroupedQueryAttention):
                 # Call post_init() method of the GroupedQueryAttention object
                 layer.self_attn.init_multi_scale_modules(self.num_new_scales, self.r, self.alpha)
+                layer.self_attn.init_x_scale_aggregator(
+                    self.num_new_scales,
+                    self.token_idx_per_scale,
+                    self._get_num_pred_tokens_per_scale(),
+                    self.ds_factor,
+                    shared_by_dim=True
+                    )
 
-        # # Post init BinaryAttentionBias
-        # for module in self.module.encoder.modules():
-        #     if isinstance(module, BinaryAttentionBias):
-        #         module.post_init(self.num_new_scales+1)
 
         # ToDo: for time id
         for module in self.module.encoder.modules():
