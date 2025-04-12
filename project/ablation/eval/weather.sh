@@ -1,20 +1,20 @@
 #!/bin/bash
 
 export HYDRA_FULL_ERROR=1
-export CUDA_VISIBLE_DEVICES=0
+export CUDA_VISIBLE_DEVICES=1
 
-mode=S
 cp=conf/lsf/multi_scale/eval
-cl=5000
 model=moirai_lightning_ckpt
+data=weather
+cl=2000
+ps=128
+mode=S
 
-cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/Etth1_cl5000_w010_lr1e-7_wlr1e-3/freeze_ffn/etth1/S/cl5000_pl96/checkpoints/epoch_15-step_784.ckpt'
-cpp2=''
-cpp3=''
-cpp4=''
+
+cpp1='./outputs/lsf/multi_scale/finetune/moirai_1.0_R_small/Idea0/freeze_ffn/weather/S/cl2000_pl96/checkpoints/epoch_8-step_12852.ckpt'
 
 index=1
-for pl in 96 192 336 720; do  # 
+for pl in 96 ; do
   case $index in
     1) cpp=$cpp1 ;;
     2) cpp=$cpp2 ;;
@@ -30,12 +30,12 @@ for pl in 96 192 336 720; do  #
     -cp $cp \
     exp_name=$exp_name/$pretrained_model/$ft_pattern  \
     model=$model \
-    model.patch_size=64 \
+    model.patch_size=$ps \
     model.context_length=$cl \
     model.checkpoint_path=$cpp \
     model.pretrained_checkpoint_path=ckpt/$pretrained_model.ckpt \
     data=lsf_test \
-    data.dataset_name=ETTh1 \
+    data.dataset_name=$data \
     data.mode=$mode \
     data.prediction_length=$pl
 
