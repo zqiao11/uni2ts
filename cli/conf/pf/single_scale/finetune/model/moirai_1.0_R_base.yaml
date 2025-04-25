@@ -40,7 +40,7 @@ context_length: null
 prediction_length: null
 finetune_pattern: full
 
-use_lora: True
+use_lora: false
 lora_kwargs:
   _target_: builtins.dict
   r: 16

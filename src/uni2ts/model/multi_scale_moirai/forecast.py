@@ -17,7 +17,7 @@ import math
 import re
 from contextlib import contextmanager
 from copy import deepcopy
-from typing import Any, Generator, Optional
+from typing import Any, Generator, Optional, List
 
 import lightning as L
 import numpy as np
@@ -55,6 +55,7 @@ from peft import LoraConfig, LoraModel
 from torch import nn
 
 import matplotlib.pyplot as plt
+import torch.nn.functional as F
 
 
 class SampleNLLLoss(_PackedNLLLoss):
@@ -136,7 +137,6 @@ class MoiraiForecast(L.LightningModule):
         self.strict_loading = False
 
         self.token_idx_per_scale = self._get_token_idx_per_scale()
-        # self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
 
         self.scale_weights = nn.Parameter(torch.ones(1 + num_new_scales))
         self.post_init()
@@ -146,7 +146,10 @@ class MoiraiForecast(L.LightningModule):
         Initialize the new params added for Multi Scale.
         """
         # # ToDo: for time id & in_proj
-        self.module.post_init(self.token_idx_per_scale)
+        self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
+        self.pred_length_per_scale = self._get_pred_length_per_scale()
+
+        self.module.post_init(self.token_idx_per_scale, self.pred_token_idx_per_scale, self.pred_length_per_scale, self.hparams.patch_size)
 
         for layer in self.module.encoder.layers:
             # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
@@ -158,7 +161,7 @@ class MoiraiForecast(L.LightningModule):
                     self.token_idx_per_scale,
                     self._get_num_pred_tokens_per_scale(),
                     self.ds_factor,
-                    shared_by_dim=True
+                    shared_by_dim=False  # True
                     )
 
 
@@ -199,6 +202,19 @@ class MoiraiForecast(L.LightningModule):
             token_idx_per_scale.append(index)
 
         return token_idx_per_scale
+
+    def _get_pred_length_per_scale(self):
+        all_scale_pred_len = []
+        pred_len = self.hparams.prediction_length
+
+        all_scale_pred_len.append(pred_len)
+
+        for i in range(self.num_new_scales):
+            pred_len = math.ceil(pred_len / self.ds_factor)
+            all_scale_pred_len.append(pred_len)
+
+        return all_scale_pred_len
+
 
     def _get_num_pred_tokens_per_scale(self):
         all_scale_pred_token_len = []
@@ -380,6 +396,38 @@ class MoiraiForecast(L.LightningModule):
     def max_patch_size(self) -> int:
         return max(self.module.patch_sizes)
 
+    # def forward(
+    #     self,
+    #     past_target: Float[torch.Tensor, "batch past_time tgt"],
+    #     past_observed_target: Bool[torch.Tensor, "batch past_time tgt"],
+    #     past_is_pad: Bool[torch.Tensor, "batch past_time"],
+    #     feat_dynamic_real: Optional[Float[torch.Tensor, "batch time feat"]] = None,
+    #     observed_feat_dynamic_real: Optional[
+    #         Float[torch.Tensor, "batch time feat"]
+    #     ] = None,
+    #     past_feat_dynamic_real: Optional[
+    #         Float[torch.Tensor, "batch past_time past_feat"]
+    #     ] = None,
+    #     past_observed_feat_dynamic_real: Optional[
+    #         Float[torch.Tensor, "batch past_time past_feat"]
+    #     ] = None,
+    #     num_samples: Optional[int] = None,
+    # ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
+    #     distr, reprs = self._get_distr(
+    #         self.hparams.patch_size,
+    #         past_target,
+    #         past_observed_target,
+    #         past_is_pad,
+    #         feat_dynamic_real,
+    #         observed_feat_dynamic_real,
+    #         past_feat_dynamic_real,
+    #         past_observed_feat_dynamic_real,
+    #     )
+    #     preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
+    #     return self._format_preds(
+    #         self.hparams.patch_size, preds, past_target.shape[-1], reprs
+    #     )
+
     def forward(
         self,
         past_target: Float[torch.Tensor, "batch past_time tgt"],
@@ -397,7 +445,7 @@ class MoiraiForecast(L.LightningModule):
         ] = None,
         num_samples: Optional[int] = None,
     ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
-        distr, reprs = self._get_distr(
+        multi_distr, reprs = self._get_distr(
             self.hparams.patch_size,
             past_target,
             past_observed_target,
@@ -407,9 +455,14 @@ class MoiraiForecast(L.LightningModule):
             past_feat_dynamic_real,
             past_observed_feat_dynamic_real,
         )
-        preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
+        multi_preds = []
+        for i in range(self.num_new_scales + 1):
+            distr = multi_distr[i]
+            preds = distr.sample(torch.Size((num_samples or self.hparams.num_samples,)))
+            multi_preds.append(preds)
+
         return self._format_preds(
-            self.hparams.patch_size, preds, past_target.shape[-1], reprs
+            self.hparams.patch_size, multi_preds, past_target.shape[-1], reprs
         )
 
     def _get_distr(
@@ -569,13 +622,13 @@ class MoiraiForecast(L.LightningModule):
 
             else:
                 # Downsample
-                past_target = self._downsample(past_target, left=True)
-                past_observed_target = self._downsample(past_observed_target, left=True)
+                past_target = self._downsample(past_target, ds_factor=self.ds_factor , left=True)
+                past_observed_target = self._downsample(past_observed_target, ds_factor=self.ds_factor, left=True)
                 past_is_pad = self._downsample(
                     past_is_pad.bool(), ds_factor=self.ds_factor, left=True
                 ).int()
-                future_target = self._downsample(future_target, left=False)
-                future_observed_target = self._downsample(future_observed_target, left=False)
+                future_target = self._downsample(future_target, ds_factor=self.ds_factor, left=False)
+                future_observed_target = self._downsample(future_observed_target, ds_factor=self.ds_factor, left=False)
                 future_is_pad = self._downsample(
                     future_is_pad.bool(), ds_factor=self.ds_factor, left=False
                 ).int()
@@ -937,144 +990,148 @@ class MoiraiForecast(L.LightningModule):
 
         return arr_new
 
-    # def _format_preds(
-    #     self,
-    #     patch_size: int,
-    #     preds: Float[torch.Tensor, "sample batch combine_seq patch"],
-    #     target_dim: int,
-    # ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
-    #     start = target_dim * self.context_token_length(
-    #         patch_size, self.hparams.context_length
-    #     )
-    #     end = start + target_dim * self.prediction_token_length(
-    #         patch_size, self.hparams.prediction_length
-    #     )
-    #     preds = preds[..., start:end, :patch_size]
-    #     preds = rearrange(
-    #         preds,
-    #         "sample ... (dim seq) patch -> ... sample (seq patch) dim",
-    #         dim=target_dim,
-    #     )[..., : self.hparams.prediction_length, :]
-    #     return preds.squeeze(-1)
+
+    def _upsample(
+        self, arr: torch.Tensor, ds_factor: int = 2
+    ) -> torch.Tensor:
+        bs, length, _ = arr.shape  # 获取维度
+
+        # 先去掉最后一维，变成 (bs, len)
+        arr = arr.squeeze(-1)
+
+        # 沿 length 维度 repeat，每个元素重复 ds_factor 次
+        arr_upsampled = arr.repeat_interleave(ds_factor, dim=-1)  # shape (bs, len * ds_factor)
+
+        # 恢复最后一维
+        arr_upsampled = arr_upsampled.unsqueeze(-1)  # shape (bs, len * ds_factor, 1)
+
+        return arr_upsampled
+
 
     def _format_preds(
         self,
         patch_size: int,
-        preds: Float[torch.Tensor, "sample batch combine_seq patch"],
+        multi_preds: List[Float[torch.Tensor, "sample batch combine_seq patch"]],
         target_dim: int,
         reprs: Float[torch.Tensor, "batch combine_seq"]
     ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
 
         preds_all_scales = []
-        sample = preds.size(0)
 
         for i in range(self.num_new_scales+1):
-            if i == 0:
-                start = target_dim * self.context_token_length(
-                    patch_size, self.hparams.context_length
-                )
-                end = start + target_dim * self.prediction_token_length(
-                    patch_size, self.hparams.prediction_length
-                )
-                preds_i = preds[..., start:end, :patch_size]
-                preds_i = rearrange(
-                    preds_i,
-                    "sample ... (dim seq) patch -> ... sample (seq patch) dim",
-                    dim=target_dim,
-                )[..., : self.hparams.prediction_length, :]
-                preds_all_scales.append(preds_i)
+            preds_i = multi_preds[i]
+            preds_i = preds_i[..., :, :patch_size]
+            preds_i = rearrange(
+                preds_i,
+                "sample ... (dim seq) patch -> ... sample (seq patch) dim",
+                dim=target_dim,
+            )[..., : self.hparams.prediction_length, :]
+            preds_all_scales.append(preds_i)
 
-            else:
-                context_length = math.ceil(self.hparams.context_length/(self.ds_factor**i))
-                prediction_length = math.ceil(self.hparams.prediction_length / (self.ds_factor ** i))
-                start = end + target_dim * self.context_token_length(
-                    patch_size, context_length
-                )
-                end = start + target_dim * self.prediction_token_length(
-                    patch_size, prediction_length
-                )
-                preds_i = preds[..., start:end, :patch_size]
-                preds_i = rearrange(
-                    preds_i,
-                    "sample ... (dim seq) patch -> ... sample (seq patch) dim",
-                    dim=target_dim,
-                )[..., : prediction_length, :]
-                preds_all_scales.append(preds_i)
-
+        # ToDO: 之前的用scale_weight的
         preds = None
         weight = torch.softmax(self.scale_weights, dim=0)
-
-        # sw_fc_input = []
-        # for i in range(1+self.num_new_scales):
-        #     pred_token_idx = self.pred_token_idx_per_scale[i]
-        #     masked_reprs = reprs[..., pred_token_idx, :].detach()
-        #     sw_fc_input.append(masked_reprs.mean(dim=1))
-        # sw_fc_input = torch.concat(sw_fc_input, dim=-1)
-        # weight = torch.softmax(
-        #     self.scale_weight_fc(sw_fc_input) / self.temperature,
-        #     dim=1
-        # )
 
         if self.print_weight is True:
             print("scale_weights: {}".format(weight))
             self.print_weight = False
 
-        # weight = repeat(weight, "bs k -> bs sample pred k", sample=sample, pred=self.hparams.prediction_length)
 
         for i in range(self.num_new_scales+1):
             preds_i = preds_all_scales[i]
-            scale_factor = self.ds_factor ** i
+
 
             if preds is None:
-                preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
+                preds = preds_i * weight[i].unsqueeze(-1)
             else:
-                preds += preds_i.repeat_interleave(scale_factor, dim=2)[:, :, :self.hparams.prediction_length, :] * weight[i].unsqueeze(-1)
+                preds += preds_i * weight[i].unsqueeze(-1)
 
-            # if preds is None:
-            #     preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
-            # else:
-            #     preds += preds_i.repeat_interleave(scale_factor, dim=2) * weight[:, :, :, i].unsqueeze(-1)
 
         return preds.squeeze(-1)
 
-    def get_default_transform(self) -> Transformation:
-        transform = AsNumpyArray(
-            field="target",
-            expected_ndim=1 if self.hparams.target_dim == 1 else 2,
-            dtype=np.float32,
-        )
-        if self.hparams.target_dim == 1:
-            transform += ExpandDimArray(field="target", axis=0)
-        transform += AddObservedValuesIndicator(
-            target_field="target",
-            output_field="observed_target",
-            dtype=bool,
-        )
-
-        if self.hparams.feat_dynamic_real_dim > 0:
-            transform += AsNumpyArray(
-                field="feat_dynamic_real",
-                expected_ndim=2,
-                dtype=np.float32,
-            )
-            transform += AddObservedValuesIndicator(
-                target_field="feat_dynamic_real",
-                output_field="observed_feat_dynamic_real",
-                dtype=bool,
-            )
-
-        if self.hparams.past_feat_dynamic_real_dim > 0:
-            transform += AsNumpyArray(
-                field="past_feat_dynamic_real",
-                expected_ndim=2,
-                dtype=np.float32,
-            )
-            transform += AddObservedValuesIndicator(
-                target_field="past_feat_dynamic_real",
-                output_field="past_observed_feat_dynamic_real",
-                dtype=bool,
-            )
-        return transform
+    # def _format_preds(
+    #     self,
+    #     patch_size: int,
+    #     preds: Float[torch.Tensor, "sample batch combine_seq patch"],
+    #     target_dim: int,
+    #     reprs: Float[torch.Tensor, "batch combine_seq"]
+    # ) -> Float[torch.Tensor, "batch sample future_time *tgt"]:
+    #
+    #     preds_all_scales = []
+    #     sample = preds.size(0)
+    #
+    #     for i in range(self.num_new_scales+1):
+    #         if i == 0:
+    #             start = target_dim * self.context_token_length(
+    #                 patch_size, self.hparams.context_length
+    #             )
+    #             end = start + target_dim * self.prediction_token_length(
+    #                 patch_size, self.hparams.prediction_length
+    #             )
+    #             preds_i = preds[..., start:end, :patch_size]
+    #             preds_i = rearrange(
+    #                 preds_i,
+    #                 "sample ... (dim seq) patch -> ... sample (seq patch) dim",
+    #                 dim=target_dim,
+    #             )[..., : self.hparams.prediction_length, :]
+    #             preds_all_scales.append(preds_i)
+    #
+    #         else:
+    #             context_length = math.ceil(self.hparams.context_length/(self.ds_factor**i))
+    #             prediction_length = math.ceil(self.hparams.prediction_length / (self.ds_factor ** i))
+    #             start = end + target_dim * self.context_token_length(
+    #                 patch_size, context_length
+    #             )
+    #             end = start + target_dim * self.prediction_token_length(
+    #                 patch_size, prediction_length
+    #             )
+    #             preds_i = preds[..., start:end, :patch_size]
+    #             preds_i = rearrange(
+    #                 preds_i,
+    #                 "sample ... (dim seq) patch -> ... sample (seq patch) dim",
+    #                 dim=target_dim,
+    #             )[..., : prediction_length, :]
+    #             preds_all_scales.append(preds_i)
+    #
+    #     # # ToDO: 之前的用scale_weight的
+    #     # preds = None
+    #     # weight = torch.softmax(self.scale_weights, dim=0)
+    #     #
+    #     # if self.print_weight is True:
+    #     #     print("scale_weights: {}".format(weight))
+    #     #     self.print_weight = False
+    #     #
+    #     #
+    #     # for i in range(self.num_new_scales+1):
+    #     #     preds_i = preds_all_scales[i]
+    #     #     scale_factor = self.ds_factor ** i
+    #     #
+    #     #     if preds is None:
+    #     #         preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
+    #     #     else:
+    #     #         preds += preds_i.repeat_interleave(scale_factor, dim=2)[:, :, :self.hparams.prediction_length, :] * weight[i].unsqueeze(-1)
+    #
+    #
+    #     preds = preds_all_scales[self.num_new_scales]
+    #     for i in range(self.num_new_scales, 0, -1):
+    #         coarse = preds
+    #         fine = preds_all_scales[i-1]
+    #         fine_pred_length = fine.size(-2)
+    #
+    #         # TODO: 残差整合
+    #         # ds_fine = down_sample(fine, self.ds_factor)  # 如果不够，在后面pad
+    #         # us_fine = ds_fine.repeat_interleave(self.ds_factor, dim=2)[:, :, :fine_pred_length, :]
+    #         # res_fine = fine - us_fine
+    #         # c2f = coarse.repeat_interleave(self.ds_factor, dim=2)[:, :, :fine_pred_length, :]
+    #         # preds = res_fine + c2f
+    #
+    #         # TODO: 对Scale分解做法的整合
+    #         c2f = coarse.repeat_interleave(self.ds_factor, dim=2)[:, :, :fine_pred_length, :]
+    #         preds = fine + c2f
+    #
+    #     # preds = preds_all_scales[0]
+    #
+    #     return preds.squeeze(-1)
 
 
     # def _format_preds(
@@ -1135,7 +1192,7 @@ class MoiraiForecast(L.LightningModule):
     #
     #     # weight = repeat(weight, "bs k -> bs sample pred k", sample=sample, pred=self.hparams.prediction_length)
     #
-    #     use_scale = 0
+    #     use_scale = 1
     #
     #     for i in range(self.num_new_scales+1):
     #
@@ -1144,38 +1201,76 @@ class MoiraiForecast(L.LightningModule):
     #
     #         preds_i = preds_all_scales[i]
     #         scale_factor = self.ds_factor ** i
-    #
-    #         # # ToDo: 从preds_all_scales获取每个scale单独的、没上采样的horizon
-    #         # upsampled_pred_i = preds_i.repeat_interleave(scale_factor, dim=2)
-    #         # plot_pred_time_series = upsampled_pred_i[sample_idx, 0, :, 0].cpu().numpy()
-    #         #
-    #         # # Concatenate past and predicted time series
-    #         # full_time_series = np.concatenate([past_time_series, plot_pred_time_series])
-    #         #
-    #         # # Create a time axis for the plot
-    #         # time_axis = np.arange(len(full_time_series))
-    #         #
-    #         # # Plot the time series
-    #         # # Plot the past time series with one color
-    #         # plt.plot(time_axis[:len(past_time_series)], past_time_series, label="Past Time Series", color='blue')
-    #         #
-    #         # # Plot the predicted time series with another color
-    #         # plt.plot(time_axis[len(past_time_series):], plot_pred_time_series, label="Predicted Time Series",
-    #         #          color='orange')
-    #         # plt.xlabel("Time")
-    #         # plt.ylabel("Value")
-    #         # plt.title("Concatenated Time Series (Past + Predicted)")
-    #         # plt.legend()
-    #         # plt.grid(True)
-    #         # plt.show()
-    #         #
-    #         # end = 1
-    #
-    #         # if preds is None:
-    #         #     preds = preds_i.repeat_interleave(scale_factor, dim=2) * weight[i].unsqueeze(-1)
-    #         # else:
-    #         #     preds += preds_i.repeat_interleave(scale_factor, dim=2)[:, :, :self.hparams.prediction_length, :] * weight[i].unsqueeze(-1)
-    #
     #         preds = preds_i.repeat_interleave(scale_factor, dim=2)
     #
     #     return preds.squeeze(-1)
+
+
+    def get_default_transform(self) -> Transformation:
+        transform = AsNumpyArray(
+            field="target",
+            expected_ndim=1 if self.hparams.target_dim == 1 else 2,
+            dtype=np.float32,
+        )
+        if self.hparams.target_dim == 1:
+            transform += ExpandDimArray(field="target", axis=0)
+        transform += AddObservedValuesIndicator(
+            target_field="target",
+            output_field="observed_target",
+            dtype=bool,
+        )
+
+        if self.hparams.feat_dynamic_real_dim > 0:
+            transform += AsNumpyArray(
+                field="feat_dynamic_real",
+                expected_ndim=2,
+                dtype=np.float32,
+            )
+            transform += AddObservedValuesIndicator(
+                target_field="feat_dynamic_real",
+                output_field="observed_feat_dynamic_real",
+                dtype=bool,
+            )
+
+        if self.hparams.past_feat_dynamic_real_dim > 0:
+            transform += AsNumpyArray(
+                field="past_feat_dynamic_real",
+                expected_ndim=2,
+                dtype=np.float32,
+            )
+            transform += AddObservedValuesIndicator(
+                target_field="past_feat_dynamic_real",
+                output_field="past_observed_feat_dynamic_real",
+                dtype=bool,
+            )
+        return transform
+
+
+def down_sample(x, kernel_size):
+    # x: shape (..., sample, len, dim)
+    *prefix, sample, length, dim = x.shape
+
+    # 计算需要 padding 的长度
+    remainder = length % kernel_size
+    if remainder != 0:
+        pad_len = kernel_size - remainder
+        # 在 len 维度（倒数第2维）尾部填 0
+        pad_shape = list(x.shape)
+        pad_shape[-2] = pad_len
+        x = torch.cat([x, x.new_zeros(pad_shape)], dim=-2)  # 在 len 维度补 0
+        length = x.shape[-2]  # 更新 length
+
+    # 变换维度以适配 avg_pool1d
+    x = x.reshape(-1, length, dim)        # 合并 prefix 和 sample
+    x = x.transpose(1, 2)                 # (batch, dim, len)
+
+    # 进行 avg pooling
+    x_pooled = F.avg_pool1d(x, kernel_size=kernel_size, stride=kernel_size)
+
+    # 恢复原维度
+    x_pooled = x_pooled.transpose(1, 2)   # (batch, len', dim)
+    new_len = x_pooled.shape[1]
+    return x_pooled.reshape(*prefix, sample, new_len, dim)
+
+def linear_upsample_1d(x: torch.Tensor, factor: int):
+    return F.interpolate(x, size=x.shape[-1] * factor, mode='linear', align_corners=True)

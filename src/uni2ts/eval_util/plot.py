@@ -6,6 +6,28 @@ import pandas as pd
 from gluonts import maybe
 from gluonts.model import Forecast
 
+from scipy.interpolate import interp1d
+
+def downsample(signal, factor):
+    """
+    降采样：平均池化
+    """
+    length = len(signal)
+    # 截断为 factor 的整数倍
+    truncate_len = (length // factor) * factor
+    signal = signal[:truncate_len]
+    # reshape 为 (num_blocks, factor)
+    signal = signal.reshape(-1, factor)
+    # 每个block取均值
+    return signal.mean(axis=1)
+
+def upsample(signal, factor ):
+    """
+    上采样
+    """
+
+    return np.repeat(signal, factor)
+
 
 def plot_single(
     inp: dict,
@@ -17,8 +39,14 @@ def plot_single(
     dim: Optional[int] = None,
     name: Optional[str] = None,
     show_label: bool = False,
+    ds_factor: int = None
 ):
     ax = maybe.unwrap_or_else(ax, plt.gca)
+
+    pred_label = label["target"]  # np.array (pred_len,)
+    if ds_factor is not None:
+        ds_pred_label = downsample(pred_label, ds_factor)
+        scale_pred_label = upsample(ds_pred_label, ds_factor)
 
     target = np.concatenate([inp["target"], label["target"]], axis=-1)
     start = inp["start"]
@@ -33,6 +61,15 @@ def plot_single(
         label="target",
         color="black",
     )
+
+    if ds_factor is not None:
+        ax.plot(
+            index.to_timestamp()[- forecast.prediction_length :],
+            scale_pred_label,
+            label="scale_target",
+            color="yellow",
+        )
+
     forecast.plot(
         intervals=intervals,
         ax=ax,

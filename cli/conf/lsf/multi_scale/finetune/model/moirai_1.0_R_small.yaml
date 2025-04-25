@@ -54,3 +54,4 @@ lora_kwargs:
 
 scale_weight_lr: 1e-2
 prior_scale: null
+xscale_lr: 1e-3

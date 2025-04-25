@@ -129,14 +129,21 @@ class Coarse2FineAggregator(nn.Module):
 
         elif fine_pred_num // self.ds_factor + 1 == coarse_pred_num:
             if fine_pred_num == coarse_pred_num == 1:
-                fused_pred_tokens = coarse_pred_tokens + fine_pred_tokens  # ToDo: 这里可能影响原始tensor上切片位置上的值...
+                fused_pred_tokens = coarse_pred_tokens + fine_pred_tokens
             else:
-                main_fine_pred_tokens = fine_pred_tokens[..., :-1, :]
-                last_fine_pred_token = fine_pred_tokens[..., -1:, :]
-                main_expanded_pred_tokens = coarse_pred_tokens[..., :-1, :].repeat_interleave(self.ds_factor, dim=-2)
-                main_fused_pred_tokens = main_fine_pred_tokens + main_expanded_pred_tokens
-                last_fused_fine_pred_token = coarse_pred_tokens[..., -1:, :] + last_fine_pred_token
-                fused_pred_tokens = torch.cat([main_fused_pred_tokens, last_fused_fine_pred_token], dim=-2)
+                if coarse_pred_num == 1:
+                    fused_pred_tokens = fine_pred_tokens + coarse_pred_tokens.repeat_interleave(min(self.ds_factor, fine_pred_num),dim=-2)
+                else:
+                    num_last = fine_pred_num - (coarse_pred_num - 1) * self.ds_factor
+                    main_fine_pred_tokens = fine_pred_tokens[..., :-num_last, :]
+                    last_fine_pred_token = fine_pred_tokens[..., -num_last :, :]
+
+                    main_expanded_pred_tokens = coarse_pred_tokens[..., :-1, :].repeat_interleave(self.ds_factor, dim=-2)
+                    main_fused_pred_tokens = main_fine_pred_tokens + main_expanded_pred_tokens
+
+                    last_expanded_pred_tokens = coarse_pred_tokens[..., -1:, :].repeat_interleave(num_last, dim=-2)
+                    last_fused_fine_pred_token = last_expanded_pred_tokens + last_fine_pred_token
+                    fused_pred_tokens = torch.cat([main_fused_pred_tokens, last_fused_fine_pred_token], dim=-2)
         else:
             raise ValueError("Unexpected PRED lengths between two consecutive scales")
 
@@ -144,11 +151,13 @@ class Coarse2FineAggregator(nn.Module):
             expanded_ctx_tokens = coarse_ctx_tokens.repeat_interleave(self.ds_factor, dim=-2)
             fused_ctx_tokens = fine_ctx_tokens + expanded_ctx_tokens
         elif fine_ctx_num // self.ds_factor + 1 == coarse_ctx_num:
-            main_fine_ctx_tokens = fine_ctx_tokens[..., 1:, :]
-            first_fine_ctx_token = fine_ctx_tokens[..., :1, :]
+            num_first = fine_ctx_num - (coarse_ctx_num - 1) * self.ds_factor
+            main_fine_ctx_tokens = fine_ctx_tokens[..., num_first:, :]
+            first_fine_ctx_token = fine_ctx_tokens[..., :num_first, :]
+
             main_expanded_ctx_tokens = coarse_ctx_tokens[..., 1:, :].repeat_interleave(self.ds_factor, dim=-2)
             main_fused_ctx_tokens = main_fine_ctx_tokens + main_expanded_ctx_tokens
-            first_fused_fine_ctx_token = coarse_ctx_tokens[..., :1, :] + first_fine_ctx_token
+            first_fused_fine_ctx_token = coarse_ctx_tokens[..., :1, :].repeat_interleave(num_first, dim=-2) + first_fine_ctx_token
             fused_ctx_tokens = torch.cat([first_fused_fine_ctx_token, main_fused_ctx_tokens], dim=-2)
         else:
             raise ValueError("Unexpected CTX lengths between two consecutive scales")
@@ -233,14 +242,21 @@ class Fine2CoarseAggregator(nn.Module):
 
         elif fine_pred_num // self.ds_factor + 1 == coarse_pred_num:
             if fine_pred_num == coarse_pred_num == 1:
-                fused_pred_tokens = coarse_pred_tokens + fine_pred_tokens  # ToDo: 这里可能影响原始tensor上切片位置上的值...
+                fused_pred_tokens = coarse_pred_tokens + fine_pred_tokens
             else:
-                main_fine_pred_tokens = fine_pred_tokens[..., :-1, :]
-                last_fine_pred_token = fine_pred_tokens[..., -1:, :]
-                main_avg_pred_tokens = self._downsample_mean(main_fine_pred_tokens)
-                main_fused_pred_tokens = coarse_pred_tokens[..., :-1, :] + main_avg_pred_tokens
-                last_fused_fine_pred_token = coarse_pred_tokens[..., -1:, :] + last_fine_pred_token
-                fused_pred_tokens = torch.cat([main_fused_pred_tokens, last_fused_fine_pred_token], dim=-2)
+                if coarse_pred_num == 1:
+                    fused_pred_tokens = coarse_pred_tokens + self._downsample_mean(fine_pred_tokens, min(self.ds_factor, fine_pred_num))
+                else:
+                    num_last = fine_pred_num - (coarse_pred_num - 1) * self.ds_factor
+                    main_fine_pred_tokens = fine_pred_tokens[..., :-num_last, :]
+                    last_fine_pred_token = fine_pred_tokens[..., -num_last:, :]
+
+                    main_avg_pred_tokens = self._downsample_mean(main_fine_pred_tokens)
+                    main_fused_pred_tokens = coarse_pred_tokens[..., :-1, :] + main_avg_pred_tokens
+
+                    last_avg_pred_tokens = self._downsample_mean(last_fine_pred_token, num_last)
+                    last_fused_fine_pred_token = coarse_pred_tokens[..., -1:, :] + last_avg_pred_tokens
+                    fused_pred_tokens = torch.cat([main_fused_pred_tokens, last_fused_fine_pred_token], dim=-2)
         else:
             raise ValueError("Unexpected PRED lengths between two consecutive scales")
 
@@ -248,11 +264,14 @@ class Fine2CoarseAggregator(nn.Module):
             avg_ctx_tokens = self._downsample_mean(fine_ctx_tokens)
             fused_ctx_tokens = coarse_ctx_tokens + avg_ctx_tokens
         elif fine_ctx_num // self.ds_factor + 1 == coarse_ctx_num:
-            main_fine_ctx_tokens = fine_ctx_tokens[..., 1:, :]
-            first_fine_ctx_token = fine_ctx_tokens[..., :1, :]
+            num_first = fine_ctx_num - (coarse_ctx_num - 1) * self.ds_factor
+            main_fine_ctx_tokens = fine_ctx_tokens[..., num_first:, :]
+            first_fine_ctx_token = fine_ctx_tokens[..., :num_first, :]
+
             main_avg_ctx_tokens = self._downsample_mean(main_fine_ctx_tokens)
             main_fused_ctx_tokens = coarse_ctx_tokens[..., 1:, :] + main_avg_ctx_tokens
-            first_fused_fine_ctx_token = coarse_ctx_tokens[..., :1, :] + first_fine_ctx_token
+            first_avg_fine_token = self._downsample_mean(first_fine_ctx_token, num_first)
+            first_fused_fine_ctx_token = coarse_ctx_tokens[..., :1, :] + first_avg_fine_token
             fused_ctx_tokens = torch.cat([first_fused_fine_ctx_token, main_fused_ctx_tokens], dim=-2)
         else:
             raise ValueError("Unexpected CTX lengths between two consecutive scales")
@@ -261,7 +280,7 @@ class Fine2CoarseAggregator(nn.Module):
 
         return fused_tokens
 
-    def _downsample_mean(self, fine_pred_tokens: torch.Tensor) -> torch.Tensor:
+    def _downsample_mean(self, fine_pred_tokens: torch.Tensor, ds_factor: int = None) -> torch.Tensor:
         """
         Args:
             fine_pred_tokens (Tensor): 输入形状为 (..., seq_len, dim)
@@ -270,7 +289,9 @@ class Fine2CoarseAggregator(nn.Module):
         Returns:
             Tensor: 输出形状为 (..., seq_len // ds_factor, dim)
         """
-        ds_factor = self.ds_factor
+        if ds_factor is None:
+            ds_factor = self.ds_factor
+
         *batch_dims, seq_len, dim = fine_pred_tokens.shape
         assert seq_len % ds_factor == 0, f"seq_len={seq_len} must be dividable by ds_factor={ds_factor}"
 
@@ -366,6 +387,8 @@ class GroupedQueryAttention(nn.Module):
         self.q_proj.requires_grad_(False)
         self.k_proj.requires_grad_(False)
         self.v_proj.requires_grad_(False)
+
+        self.out_proj.requires_grad_(False)
 
         for _ in range(1+num_new_scales):
             # Append the new parameters for the current scale
@@ -688,7 +711,6 @@ class GroupedQueryAttention(nn.Module):
         )
         out = rearrange(out, "... group hpg q_len dim -> ... q_len (group hpg dim)")
 
-        # # ToDO: Apply Aggre
         if hasattr(self, "c2f_aggregator") and hasattr(self, "f2c_aggregator"):
             out = self.out_proj(out)
             out_c2f = self.c2f_aggregator(out)
@@ -696,11 +718,6 @@ class GroupedQueryAttention(nn.Module):
             out_x = (out_c2f + out_f2c) / 2
 
             return out_x
-
-        # if hasattr(self, "c2f_aggregator"):
-        #     out = self.out_proj(out)
-        #     out_c2f = self.c2f_aggregator(out)
-        #     return out_c2f
 
         else:
             return self.out_proj(out)

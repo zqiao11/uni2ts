@@ -131,6 +131,27 @@ class AddNewScaleSeries(CheckArrNDimMixin, Transformation):
         data_entry["context_length_new_scales"] = self.context_length_new_scales
         data_entry["prediction_length_new_scales"] = self.prediction_length_new_scales
 
+        # scales_target_fields = list((self.target_field,) + self.new_scales_target_fields)
+        # for i in range(len(scales_target_fields)-1):
+        #     field = scales_target_fields[i]
+        #     field_next = scales_target_fields[i+1]
+        #     scale = data_entry[field]
+        #     scale_next = data_entry[field_next]
+        #
+        #     if i == 0:
+        #         context_length = data_entry["context_length"]
+        #         prediction_length = data_entry["prediction_length"]
+        #         # Remove padded NAN from target
+        #         patch_size = data_entry["patch_size"]
+        #         context_pad = -context_length % patch_size
+        #         prediction_pad = -prediction_length % patch_size
+        #         if prediction_pad > 0:
+        #             data_entry[field][:, context_pad:-prediction_pad] = data_entry[field][:, context_pad:-prediction_pad] - self._upsample(data_entry[field_next])
+        #         else:
+        #             data_entry[field][:, context_pad:] = data_entry[field][:, context_pad:] - self._upsample(data_entry[field_next])
+        #     else:
+        #         data_entry[field] = self._upsample(data_entry[field_next])
+
         return data_entry
 
     def _downsample(self, data_entry: dict[str, Any], field: str) -> np.ndarray:
@@ -190,6 +211,10 @@ class AddNewScaleSeries(CheckArrNDimMixin, Transformation):
         self.new_prediction_length_list.append(new_prediction_length)
 
         return arr_new
+
+    def _upsample(self, arr) -> np.ndarray:
+        ds_factor = self.ds_factor
+        return np.repeat(arr, ds_factor, axis=-1)
 
 
 @dataclass

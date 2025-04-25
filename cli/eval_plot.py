@@ -118,6 +118,7 @@ def main(cfg: DictConfig):
                     dim=None,
                     name="pred",
                     show_label=True,
+                    ds_factor=4
                 )
 
                 # plot_next_multi(

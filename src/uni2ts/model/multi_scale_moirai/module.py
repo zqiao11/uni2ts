@@ -39,6 +39,7 @@ from uni2ts.module.position import (
 from uni2ts.module.ts_embed import MultiInSizeLinear
 
 import copy
+import math
 
 def encode_distr_output(
     distr_output: DistributionOutput,
@@ -198,13 +199,118 @@ class MoiraiModule(
             var_id=variate_id,
         )  # (bs, seq_len, max_patch)
         distr_param = self.param_proj(reprs, patch_size)
-        distr = self.distr_output.distribution(distr_param, loc=loc, scale=scale)
-        return distr, reprs
 
-    def post_init(self, token_idx_per_scale):
+        # TODO: 把所有scale的pred token的分布参数，单独upsample回scale
+        # ToDO: 只用pred0部分的切片，分布只包括预测部分；所有scale的分布都为同一个形状，即原scale的pred len
+        # ToDO: 返回多个分布，每个scale 1个单独的分布
+
+        multi_distr = []
+        loc0 = loc[..., self.pred_token_idx_per_scale[0], :]
+        scale0 = scale[..., self.pred_token_idx_per_scale[0], :]
+
+        for i in range(self.num_scales):
+            if i == 0:
+                distr_param_i = self._extract_pred_distr_param_per_scale(distr_param, scale=i)
+            else:
+                distr_param_i = self._upsample_pred_distr_param(distr_param, scale=i)
+
+            distr = self.distr_output.distribution(distr_param_i, loc=loc0, scale=scale0)
+            multi_distr.append(distr)
+
+        return multi_distr, reprs
+
+    def _extract_pred_distr_param_per_scale(self, dist_param, scale):
+
+        index = self.pred_token_idx_per_scale[scale]
+        weights_slice = dist_param['weights_logits'][..., index, :, :].clone()
+
+        components_slice = []
+        for comp in dist_param['components']:
+            comp_slice = {}
+            for param_name, param_value in comp.items():
+                comp_slice[param_name] = param_value[..., index, :].clone()
+            components_slice.append(comp_slice)
+
+        return {
+            'weights_logits': weights_slice,
+            'components': components_slice
+        }
+
+    def _upsample_pred_distr_param(self, dist_param, scale, upsampling_mode='repeat'):
+
+        index0 = self.pred_token_idx_per_scale[0]
+        pred_len0 = self.pred_length_per_scale[0]
+        N0 = len(index0)
+
+        index = self.pred_token_idx_per_scale[scale]
+        pred_len = self.pred_length_per_scale[scale]
+
+        ds_factor = math.ceil(pred_len0 / pred_len)
+        ps = self.patch_size
+        bs = dist_param['weights_logits'].shape[:-3]
+        main = (N0 - 1) * ps
+        last = pred_len0 - main
+
+        weights_slice_up = dist_param['weights_logits'][..., index0, :, :].clone()
+        weights_slice = dist_param['weights_logits'][..., index, :ps, :].clone()
+        weights_flat = weights_slice.reshape(*bs, -1, weights_slice.shape[-1])  # (*bs, pred_len_with_pad, 4)
+        weights_flat_wo_pad = weights_flat[..., :pred_len, :]
+        if upsampling_mode == 'repeat':
+            weights_up = weights_flat_wo_pad.repeat_interleave(ds_factor, dim=-2)
+        elif upsampling_mode == 'linear':
+            weights_up = F.interpolate(
+                weights_flat_wo_pad.transpose(-2, -1),
+                scale_factor=ds_factor,
+                mode='linear',
+                align_corners=True
+            ).transpose(-2, -1)
+        else:
+            raise ValueError("upsampling_mode must be 'repeat' or 'linear'")
+
+        weights_slice_up[..., :-1, :ps, :] =  weights_up[..., :main, :].reshape((*bs, N0-1, ps, -1))
+        weights_slice_up[..., -1:, :last, :] = weights_up[..., main: main + last, :].reshape((*bs, 1, last, -1))
+
+        components_slice_up = []
+        for comp in dist_param['components']:
+            comp_slice = {}
+            for param_name, param_value in comp.items():
+                param_slice_up = param_value[..., index0, :].clone()
+                param_slice = param_value[..., index, :ps].clone()
+                param_flat = param_slice.reshape(*bs, -1)  # (*bs, pred_len_with_pad)
+                param_flat_wo_pad = param_flat[..., :pred_len]
+                if upsampling_mode == 'repeat':
+                    param_up = param_flat_wo_pad.repeat_interleave(ds_factor, dim=-1)
+                elif upsampling_mode == 'linear':
+                    param_up = F.interpolate(
+                        param_flat_wo_pad.unsqueeze(-2),
+                        scale_factor=ds_factor,
+                        mode='linear',
+                        align_corners=True
+                    ).squeeze(-2)
+                else:
+                    raise ValueError("upsampling_mode must be 'repeat' or 'linear'")
+
+                param_slice_up[..., :-1, :ps] = param_up[..., :main].reshape((*bs, N0 - 1, ps))
+                param_slice_up[..., -1:, :last] = param_up[..., main: main + last].reshape((*bs, 1, last))
+
+
+                comp_slice[param_name] = param_slice_up
+            components_slice_up.append(comp_slice)
+
+        return {
+            'weights_logits': weights_slice_up,
+            'components': components_slice_up
+        }
+
+
+    def post_init(self, token_idx_per_scale, pred_token_idx_per_scale, pred_length_per_scale, patch_size):
         self.token_idx_per_scale = token_idx_per_scale
         self.num_scales = len(token_idx_per_scale)
         self.in_proj_adaptors = nn.ParameterList()
+
+        self.pred_token_idx_per_scale = pred_token_idx_per_scale
+        self.pred_length_per_scale = pred_length_per_scale
+        self.patch_size = patch_size
 
         # 每个scale一个FC layer做input proj的adaptation
         for scale in range(0, self.num_scales):
