@@ -15,7 +15,7 @@ ckpt_path: null
 trainer:
   _target_: lightning.Trainer
   accelerator: auto
-  strategy: auto
+  strategy: ddp_find_unused_parameters_true  # for unused/frozen parameters, preventing the crash.
   devices: auto
   num_nodes: 1
   precision: 32
@@ -41,7 +41,7 @@ trainer:
       mode: min
       strict: false
       verbose: true
-  max_epochs: 1000
+  max_epochs: 100
   enable_progress_bar: true
   accumulate_grad_batches: 1
   gradient_clip_val: 1.0

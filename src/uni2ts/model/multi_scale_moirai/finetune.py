@@ -125,9 +125,11 @@ class MoiraiFinetune(L.LightningModule):
         temperature: int = 1,
         use_lora: bool = False,
         lora_kwargs: Optional[dict[str, Any]] = None,
+        head_lr: Optional[float] = None,
         scale_weight_lr: float = 1e-3,
         xscale_lr: float = 1e-3,
         prior_scale: Optional[int] = None,
+        shared_by_dim:  bool = True,
     ):
         super().__init__()
         self.save_hyperparameters(ignore=["module"])
@@ -152,9 +154,7 @@ class MoiraiFinetune(L.LightningModule):
         """
         Initialize the new params added for Multi Scale.
         """
-        self.pred_token_idx_per_scale = self._get_pred_token_idx_per_scale()
-        self.pred_length_per_scale = self._get_pred_length_per_scale()
-        self.module.post_init(self.token_idx_per_scale, self.pred_token_idx_per_scale, self.pred_length_per_scale, self.patch_size)
+        self.module.post_init(self.token_idx_per_scale)
 
         for layer in self.module.encoder.layers:
             # Check if the layer has an attribute named `self_attn` and if it is an instance of GroupedQueryAttention
@@ -166,7 +166,7 @@ class MoiraiFinetune(L.LightningModule):
                     self.token_idx_per_scale,
                     self._get_num_pred_tokens_per_scale(),
                     self.ds_factor,
-                    shared_by_dim=False  # True
+                    shared_by_dim=self.hparams.shared_by_dim
                     )
 
     def _get_token_idx_per_scale(self):
@@ -254,116 +254,35 @@ class MoiraiFinetune(L.LightningModule):
         )
         return distr
 
-    # def training_step(
-    #     self, batch: dict[str, torch.Tensor], batch_idx: int
-    # ) -> torch.Tensor:
-    #     distr, reprs = self.module(
-    #         **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
-    #     )
-    #     loss_mix = self.hparams.loss_func(  # (bs, len, ps)
-    #         pred=distr,
-    #         return_loss_batchwise=True,
-    #         **{
-    #             field: batch[field]
-    #             for field in [
-    #                 "target",
-    #                 "prediction_mask",
-    #                 "observed_mask",
-    #                 "sample_id",
-    #                 "variate_id",
-    #             ]
-    #         },
-    #     )
-    #     batch_size = (
-    #         batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
-    #     )
-    #
-    #     loss = 0
-    #     scale_weight = torch.softmax(self.scale_weights, dim=0)
-    #     for i in range(1 + self.num_new_scales):
-    #         token_idx = self.token_idx_per_scale[i]
-    #         loss_i = loss_mix[..., token_idx, :].sum()
-    #         loss += loss_i * scale_weight[i]
-    #
-    #         self.log(
-    #             f"train_{i}/{self.hparams.loss_func.__class__.__name__}",
-    #             loss_i,
-    #             on_step=self.hparams.log_on_step,
-    #             on_epoch=True,
-    #             prog_bar=True,
-    #             logger=True,
-    #             sync_dist=True,
-    #             batch_size=batch_size,
-    #             rank_zero_only=True,
-    #         )
-    #
-    #         self.log(
-    #             f"train_scale_weight/{i}",
-    #             scale_weight[i],
-    #             on_step=self.hparams.log_on_step,
-    #             on_epoch=True,
-    #             prog_bar=True,
-    #             logger=True,
-    #             sync_dist=True,
-    #             batch_size=batch_size,
-    #             rank_zero_only=True,
-    #         )
-    #
-    #     self.log(
-    #         f"train/{self.hparams.loss_func.__class__.__name__}",
-    #         loss,
-    #         on_step=self.hparams.log_on_step,
-    #         on_epoch=True,
-    #         prog_bar=True,
-    #         logger=True,
-    #         sync_dist=True,
-    #         batch_size=batch_size,
-    #         rank_zero_only=True,
-    #     )
-    #     return loss
-
     def training_step(
         self, batch: dict[str, torch.Tensor], batch_idx: int
     ) -> torch.Tensor:
-        multi_distr, reprs = self.module(
+        distr, reprs = self.module(
             **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
         )
-
-        origin_pred_idx = self.pred_token_idx_per_scale[0]
-        origin_pred_idx = torch.tensor(origin_pred_idx, device=batch["sample_id"].device)
-
-        origin_pred_batch = {}
-        for field in ["target", "prediction_mask", "observed_mask", "sample_id", "variate_id"]:
-            tensor = batch[field]
-            if tensor.ndim == batch["sample_id"].ndim + 1:
-                sliced = tensor.index_select(dim=-2, index=origin_pred_idx)
-            else:
-                sliced = tensor.index_select(dim=-1, index=origin_pred_idx)
-            origin_pred_batch[field] = sliced
-
-
-        # ToDO: 这得改！ distr的采样得到形状是 (bs, len, max_ps); 对所有prediction_mask为0
-        loss = 0
-        scale_weight = torch.softmax(self.scale_weights, dim=0)
+        loss_mix = self.hparams.loss_func(  # (bs, len, ps)
+            pred=distr,
+            return_loss_batchwise=True,
+            **{
+                field: batch[field]
+                for field in [
+                    "target",
+                    "prediction_mask",
+                    "observed_mask",
+                    "sample_id",
+                    "variate_id",
+                ]
+            },
+        )
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
-        for i in range(self.num_new_scales+1):
-            loss_i = self.hparams.loss_func(
-                pred=multi_distr[i],
-                return_loss_batchwise=True,
-                **{
-                    # ToDo: 这里其实可以只用pred0的部分。所有scale都一样。
-                    field: origin_pred_batch[field]
-                    for field in [
-                        "target",
-                        "prediction_mask",
-                        "observed_mask",
-                        "sample_id",
-                        "variate_id",
-                    ]
-                },
-            ).sum()
+
+        loss = 0
+        scale_weight = torch.softmax(self.scale_weights, dim=0)
+        for i in range(1 + self.num_new_scales):
+            token_idx = self.token_idx_per_scale[i]
+            loss_i = loss_mix[..., token_idx, :].sum()
             loss += loss_i * scale_weight[i]
 
             self.log(
@@ -406,44 +325,33 @@ class MoiraiFinetune(L.LightningModule):
     def validation_step(
         self, batch: dict[str, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
-        multi_distr, reprs = self.module(
+        distr, reprs = self.module(
             **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
         )
 
-        origin_pred_idx = self.pred_token_idx_per_scale[0]
-        origin_pred_idx = torch.tensor(origin_pred_idx, device=batch["sample_id"].device)
-
-        origin_pred_batch = {}
-        for field in ["target", "prediction_mask", "observed_mask", "sample_id", "variate_id"]:
-            tensor = batch[field]
-            if tensor.ndim == batch["sample_id"].ndim + 1:
-                sliced = tensor.index_select(dim=-2, index=origin_pred_idx)
-            else:
-                sliced = tensor.index_select(dim=-1, index=origin_pred_idx)
-            origin_pred_batch[field] = sliced
-
-        # ToDO: 这得改！ distr的采样得到形状是 (bs, len, max_ps); 对所有prediction_mask为0
-        val_loss = 0
-        scale_weight = torch.softmax(self.scale_weights, dim=0)
+        loss_mix = self.hparams.loss_func(  # (bs, len, ps)
+            pred=distr,
+            return_loss_batchwise=True,
+            **{
+                field: batch[field]
+                for field in [
+                    "target",
+                    "prediction_mask",
+                    "observed_mask",
+                    "sample_id",
+                    "variate_id",
+                ]
+            },
+        )
         batch_size = (
             batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
         )
-        for i in range(self.num_new_scales + 1):
-            loss_i = self.hparams.loss_func(
-                pred=multi_distr[i],
-                return_loss_batchwise=True,
-                **{
-                    # ToDo: 这里其实可以只用pred0的部分。所有scale都一样。
-                    field: origin_pred_batch[field]
-                    for field in [
-                        "target",
-                        "prediction_mask",
-                        "observed_mask",
-                        "sample_id",
-                        "variate_id",
-                    ]
-                },
-            ).sum()
+
+        val_loss = 0
+        scale_weight = torch.softmax(self.scale_weights, dim=0)
+        for i in range(1 + self.num_new_scales):
+            token_idx = self.token_idx_per_scale[i]
+            loss_i = loss_mix[..., token_idx, :].sum()
             val_loss += loss_i * scale_weight[i]
 
             self.log(
@@ -470,196 +378,75 @@ class MoiraiFinetune(L.LightningModule):
             rank_zero_only=True,
         )
 
-        # ToDO: 之后改
-        # if self.hparams.val_metric is not None:
-        #     val_metrics = (
-        #         self.hparams.val_metric
-        #         if isinstance(self.hparams.val_metric, list)
-        #         else [self.hparams.val_metric]
-        #     )
-        #     for metric_func in val_metrics:
-        #         if isinstance(metric_func, PackedPointLoss):
-        #             pred = distr.sample(torch.Size((self.hparams.num_samples,)))
-        #             pred = torch.median(pred, dim=0).values
-        #         elif isinstance(metric_func, PackedDistributionLoss):
-        #             pred = distr
-        #         else:
-        #             raise ValueError(f"Unsupported loss function: {metric_func}")
-        #
-        #         metric_mix = metric_func(
-        #             pred=pred,
-        #             return_loss_batchwise=True,
-        #             **{
-        #                 field: batch[field]
-        #                 for field in [
-        #                     "target",
-        #                     "prediction_mask",
-        #                     "observed_mask",
-        #                     "sample_id",
-        #                     "variate_id",
-        #                 ]
-        #             },
-        #         )
-        #
-        #         # Compute weighted metric
-        #         metric = 0
-        #         for i in range(1 + self.num_new_scales):
-        #             token_idx = self.token_idx_per_scale[i]
-        #             metric_i = metric_mix[..., token_idx, :].sum()  # (bs, )
-        #             metric += metric_i * scale_weight[i]
-        #
-        #             self.log(
-        #                 f"val_{i}/{metric_func.__class__.__name__}",
-        #                 metric_i,
-        #                 on_step=self.hparams.log_on_step,
-        #                 on_epoch=True,
-        #                 prog_bar=True,
-        #                 logger=True,
-        #                 sync_dist=True,
-        #                 batch_size=batch_size,
-        #                 rank_zero_only=True,
-        #             )
-        #
-        #         self.log(
-        #             f"val/{metric_func.__class__.__name__}",
-        #             metric,
-        #             on_step=self.hparams.log_on_step,
-        #             on_epoch=True,
-        #             prog_bar=True,
-        #             logger=True,
-        #             sync_dist=True,
-        #             batch_size=batch_size,
-        #             rank_zero_only=True,
-        #         )
+        if self.hparams.val_metric is not None:
+            val_metrics = (
+                self.hparams.val_metric
+                if isinstance(self.hparams.val_metric, list)
+                else [self.hparams.val_metric]
+            )
+            for metric_func in val_metrics:
+                if isinstance(metric_func, PackedPointLoss):
+                    pred = distr.sample(torch.Size((self.hparams.num_samples,)))
+                    pred = torch.median(pred, dim=0).values
+                elif isinstance(metric_func, PackedDistributionLoss):
+                    pred = distr
+                else:
+                    raise ValueError(f"Unsupported loss function: {metric_func}")
+
+                metric_mix = metric_func(
+                    pred=pred,
+                    return_loss_batchwise=True,
+                    **{
+                        field: batch[field]
+                        for field in [
+                            "target",
+                            "prediction_mask",
+                            "observed_mask",
+                            "sample_id",
+                            "variate_id",
+                        ]
+                    },
+                )
+
+                # Compute weighted metric
+                metric = 0
+                for i in range(1 + self.num_new_scales):
+                    token_idx = self.token_idx_per_scale[i]
+                    metric_i = metric_mix[..., token_idx, :].sum()  # (bs, )
+                    metric += metric_i * scale_weight[i]
+
+                    self.log(
+                        f"val_{i}/{metric_func.__class__.__name__}",
+                        metric_i,
+                        on_step=self.hparams.log_on_step,
+                        on_epoch=True,
+                        prog_bar=True,
+                        logger=True,
+                        sync_dist=True,
+                        batch_size=batch_size,
+                        rank_zero_only=True,
+                    )
+
+                self.log(
+                    f"val/{metric_func.__class__.__name__}",
+                    metric,
+                    on_step=self.hparams.log_on_step,
+                    on_epoch=True,
+                    prog_bar=True,
+                    logger=True,
+                    sync_dist=True,
+                    batch_size=batch_size,
+                    rank_zero_only=True,
+                )
 
         return val_loss
-
-
-
-    # def validation_step(
-    #     self, batch: dict[str, torch.Tensor], batch_idx: int, dataloader_idx: int = 0
-    # ) -> torch.Tensor:
-    #     distr, reprs = self.module(
-    #         **{field: batch[field] for field in list(self.seq_fields) + ["sample_id"]}
-    #     )
-    #
-    #     loss_mix = self.hparams.loss_func(  # (bs, len, ps)
-    #         pred=distr,
-    #         return_loss_batchwise=True,
-    #         **{
-    #             field: batch[field]
-    #             for field in [
-    #                 "target",
-    #                 "prediction_mask",
-    #                 "observed_mask",
-    #                 "sample_id",
-    #                 "variate_id",
-    #             ]
-    #         },
-    #     )
-    #     batch_size = (
-    #         batch["sample_id"].max(dim=1).values.sum() if "sample_id" in batch else None
-    #     )
-    #
-    #     val_loss = 0
-    #     scale_weight = torch.softmax(self.scale_weights, dim=0)
-    #     for i in range(1 + self.num_new_scales):
-    #         token_idx = self.token_idx_per_scale[i]
-    #         loss_i = loss_mix[..., token_idx, :].sum()
-    #         val_loss += loss_i * scale_weight[i]
-    #
-    #         self.log(
-    #             f"val_{i}/{self.hparams.loss_func.__class__.__name__}",
-    #             loss_i,
-    #             on_step=self.hparams.log_on_step,
-    #             on_epoch=True,
-    #             prog_bar=True,
-    #             logger=True,
-    #             sync_dist=True,
-    #             batch_size=batch_size,
-    #             rank_zero_only=True,
-    #         )
-    #
-    #     self.log(
-    #         f"val/{self.hparams.loss_func.__class__.__name__}",
-    #         val_loss,
-    #         on_step=self.hparams.log_on_step,
-    #         on_epoch=True,
-    #         prog_bar=True,
-    #         logger=True,
-    #         sync_dist=True,
-    #         batch_size=batch_size,
-    #         rank_zero_only=True,
-    #     )
-    #
-    #     if self.hparams.val_metric is not None:
-    #         val_metrics = (
-    #             self.hparams.val_metric
-    #             if isinstance(self.hparams.val_metric, list)
-    #             else [self.hparams.val_metric]
-    #         )
-    #         for metric_func in val_metrics:
-    #             if isinstance(metric_func, PackedPointLoss):
-    #                 pred = distr.sample(torch.Size((self.hparams.num_samples,)))
-    #                 pred = torch.median(pred, dim=0).values
-    #             elif isinstance(metric_func, PackedDistributionLoss):
-    #                 pred = distr
-    #             else:
-    #                 raise ValueError(f"Unsupported loss function: {metric_func}")
-    #
-    #             metric_mix = metric_func(
-    #                 pred=pred,
-    #                 return_loss_batchwise=True,
-    #                 **{
-    #                     field: batch[field]
-    #                     for field in [
-    #                         "target",
-    #                         "prediction_mask",
-    #                         "observed_mask",
-    #                         "sample_id",
-    #                         "variate_id",
-    #                     ]
-    #                 },
-    #             )
-    #
-    #             # Compute weighted metric
-    #             metric = 0
-    #             for i in range(1 + self.num_new_scales):
-    #                 token_idx = self.token_idx_per_scale[i]
-    #                 metric_i = metric_mix[..., token_idx, :].sum()  # (bs, )
-    #                 metric += metric_i * scale_weight[i]
-    #
-    #                 self.log(
-    #                     f"val_{i}/{metric_func.__class__.__name__}",
-    #                     metric_i,
-    #                     on_step=self.hparams.log_on_step,
-    #                     on_epoch=True,
-    #                     prog_bar=True,
-    #                     logger=True,
-    #                     sync_dist=True,
-    #                     batch_size=batch_size,
-    #                     rank_zero_only=True,
-    #                 )
-    #
-    #             self.log(
-    #                 f"val/{metric_func.__class__.__name__}",
-    #                 metric,
-    #                 on_step=self.hparams.log_on_step,
-    #                 on_epoch=True,
-    #                 prog_bar=True,
-    #                 logger=True,
-    #                 sync_dist=True,
-    #                 batch_size=batch_size,
-    #                 rank_zero_only=True,
-    #             )
-    #
-    #     return val_loss
 
     def configure_optimizers(self) -> dict:
         decay = set()
         no_decay = set()
         scale_weight_params = set()
         xscale_agg_params = set()
+        head_params = set()
 
         if self.finetune_pattern == 'full':
             pass
@@ -721,6 +508,9 @@ class MoiraiFinetune(L.LightningModule):
                 if 'c2f_aggregator' in pn or 'f2c_aggregator' in pn:
                     xscale_agg_params.add(fpn)
 
+                if 'param_proj' in  pn:
+                    head_params.add(fpn)
+
 
         # validate that we considered every parameter
         param_dict = {pn: p for pn, p in self.named_parameters() if p.requires_grad}
@@ -739,8 +529,8 @@ class MoiraiFinetune(L.LightningModule):
         ), f"parameters {str(union_params - param_dict.keys())} were not included in param_dict!"
 
         # Separate the scale_weight_params and others
-        decay = decay - scale_weight_params - xscale_agg_params
-        no_decay = no_decay - scale_weight_params - xscale_agg_params
+        decay = decay - scale_weight_params - xscale_agg_params - head_params
+        no_decay = no_decay - scale_weight_params - xscale_agg_params - head_params
 
         optim_groups = [
             {
@@ -771,6 +561,14 @@ class MoiraiFinetune(L.LightningModule):
                     [param_dict[pn] for pn in sorted(list(xscale_agg_params))],
                 ),
                 "lr": self.hparams.xscale_lr,
+                "weight_decay": self.hparams.weight_decay,
+            },
+            {
+                "params": filter(
+                    lambda p: p.requires_grad,
+                    [param_dict[pn] for pn in sorted(list(head_params))],
+                ),
+                "lr": self.hparams.lr if self.hparams.head_lr is None else self.hparams.head_lr,
                 "weight_decay": self.hparams.weight_decay,
             },
         ]
